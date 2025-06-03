@@ -1,4 +1,3 @@
 fastrtc[vad,stt,tts,stopword]
 requests
 soundfile
-cv2

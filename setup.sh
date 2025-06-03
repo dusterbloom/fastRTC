@@ -29,24 +29,14 @@ fi
 echo -e "${BLUE}📍 Using Python: $(which $PYTHON_CMD)${NC}"
 echo -e "${BLUE}📍 Python version: $($PYTHON_CMD --version)${NC}"
 
-# Create project directory
-PROJECT_DIR="fastrtc_test"
-if [ -d "$PROJECT_DIR" ]; then
-    echo -e "${YELLOW}⚠️  Directory $PROJECT_DIR exists. Removing...${NC}"
-    rm -rf "$PROJECT_DIR"
-fi
-
-echo -e "${BLUE}📁 Creating project directory: $PROJECT_DIR${NC}"
-mkdir -p "$PROJECT_DIR"
-cd "$PROJECT_DIR"
 
 # Create virtual environment
 echo -e "${BLUE}🐍 Creating virtual environment...${NC}"
-$PYTHON_CMD -m venv fastrtc_env
+$PYTHON_CMD -m venv env
 
 # Activate virtual environment
 echo -e "${BLUE}🔧 Activating virtual environment...${NC}"
-source fastrtc_env/bin/activate
+source env/bin/activate
 
 # Upgrade pip
 echo -e "${BLUE}📦 Upgrading pip...${NC}"
