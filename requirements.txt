@@ -10,6 +10,9 @@ mem0ai
 # Optional: For local embeddings (recommended)
 ollama (install separately)
 
+aiohttp
+asyncio
+
 # Optional: For better performance
 # qdrant-client (if using Qdrant vector store)
 # neo4j (if using graph memory)
