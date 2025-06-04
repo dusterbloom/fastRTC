@@ -6,7 +6,7 @@ This replaces your entire Piper v2 system with ~50 lines of code!
 
 import sys
 import time
-from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model, AlgoOptions, SileroVadOptions
+from fastrtc import ReplyOnPause, Stream, get_stt_model, get_tts_model, AlgoOptions, SileroVadOptions, ReplyOnStopWords, KokoroTTSOptions
 import requests
 
 print("🎙️ FastRTC Voice Assistant Starting...")
@@ -44,20 +44,20 @@ def get_llm_response(text):
             json={
                 "model": LM_STUDIO_MODEL,
                 "messages": [
-                    {"role": "system", "content": "You are Mistral. You are an AI designed to help humans."},
+                    {"role": "system", "content": "You are Mistral, a friendly and concise voice assistant. Keep your answers brief and to the point."},
                     {"role": "user", "content": text}
                 ],
-                "max_tokens": 256,
+                "max_tokens": 512,
                 "temperature": 0.7
             },
-            timeout=10
+            timeout=15
         )
         
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
         else:
             print_status(f"⚠️ LLM error: {response.status_code}")
-            return f"I heard you say: {text}"
+            return f"Sorry, I couldn't process that."
             
     except requests.exceptions.RequestException as e:
         print_status(f"⚠️ LM Studio not available: {e}")
@@ -78,17 +78,26 @@ def voice_assistant(audio):
     print_status(f"👤 User: {user_text}")
     
     # Get LLM response
+   
     assistant_text = get_llm_response(user_text)
     print_status(f"🤖 Assistant: {assistant_text}")
     
     # Text to Speech (streaming)
-    for audio_chunk in tts_model.stream_tts_sync(assistant_text):
+    options = KokoroTTSOptions(
+    voice="af_heart", # if_sara if_nicola for italian
+    speed=1.0, 
+    lang="en-us" # Change to "it-it" for Italian, "en-us" for English, etc.
+)
+    for audio_chunk in tts_model.stream_tts_sync(assistant_text, options):
         yield audio_chunk
 
 # Create stream with automatic VAD and turn-taking
 print_status("🌐 Creating FastRTC stream...")
 
 stream = Stream(
+    # ReplyOnStopWords(voice_assistant,
+    #                         input_sample_rate=16000,
+    #                         stop_words=["stop"]), 
     ReplyOnPause(
         voice_assistant,
         can_interrupt=True,  # Allow interruptions
@@ -100,11 +109,19 @@ stream = Stream(
         model_options=SileroVadOptions(
             threshold=0.5, # Adjust for sensitivity
             min_speech_duration_ms=500, # Adjust for your needs 
-            min_silence_duration_ms=1000 # Adjust for your needs the longer it is the more it will wait for the user to stop talking
+            min_silence_duration_ms=2500 # Adjust for your needs the longer it is the more it will wait for the user to stop talking
         )
     ), 
     modality="audio", 
-    mode="send-receive"
+    mode="send-receive",
+    track_constraints={
+            "echoCancellation": True,
+            "noiseSuppression": {"exact": True},
+            "autoGainControl": {"exact": True},
+            "sampleRate": {"ideal": 24000},
+            "sampleSize": {"ideal": 16},
+            "channelCount": {"exact": 1},
+        }
 )
 
 print_status("🚀 Starting voice assistant...")
