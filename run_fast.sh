@@ -5,8 +5,8 @@ if [ "$1" == "" ]; then
     echo "Select a mode:"
     echo "1) FastRTC Voice Assistant"
     echo "2) FastRTC Voice Assistant with Memory"
-    echo "3) Echo Test"
-    read -p "Enter your choice (1-4): " choice
+    echo "3) Test"
+    read -p "Enter your choice (1-3): " choice
 
     case "$choice" in
       1)
@@ -39,8 +39,8 @@ case "$option" in
     python voice_assistant_with_memory.py
     ;;
   echo_test)
-    echo "🔄 Starting Echo Test..."
-    python echo_test.py
+    echo "🔄 Starting Test..."
+    python test.py
     ;;
   *)
     echo "Invalid option: $option"

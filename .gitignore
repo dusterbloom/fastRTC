@@ -1,3 +1,6 @@
 env/
 mem0_voice_db*/
 *.db
+qdrant_storage/
+chroma_db/
+.vscode/
