@@ -4,3 +4,5 @@ mem0_voice_db*/
 qdrant_storage/
 chroma_db/
 .vscode/
+__pycache__/
+a_mem/__pycache__/

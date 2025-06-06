@@ -54,11 +54,11 @@ echo -e "${BLUE}🧠 Installing memory system (ChromaDB + embeddings)...${NC}"
 pip install chromadb sentence-transformers
 
 # Install Qdrant docker client 
-#docker pull qdrant/qdrant
+docker pull qdrant/qdrant
 
-#docker run -p 6333:6333 -p 6334:6334 \
-#    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
-#    qdrant/qdrant
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    qdrant/qdrant
     
 # Create necessary directories
 echo -e "${BLUE}📁 Creating data directories...${NC}"
