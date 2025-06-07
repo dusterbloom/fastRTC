@@ -18,3 +18,4 @@ asyncio
 qdrant-client (if using Qdrant vector store)
 transformers>=4.36.2
 # neo4j (if using graph memory)
+fastrtc-whisper-cpp
