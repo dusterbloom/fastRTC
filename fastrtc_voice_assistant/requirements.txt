@@ -1,0 +1,27 @@
+# Core FastRTC dependencies
+fastrtc[vad,stt,tts,stopword]
+requests
+soundfile
+chromadb>=0.4.22
+sentence-transformers>=2.2.2
+rank_bm25>=0.2.2
+
+# Mem0 dependencies (new)
+mem0ai
+
+# LLM dependencies for A-MEM
+litellm
+
+# HTTP and async
+aiohttp
+
+# Vector database
+qdrant-client
+transformers>=4.36.2
+
+# FastRTC Whisper
+fastrtc-whisper-cpp
+
+# Development and testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
