@@ -11,6 +11,7 @@ mem0ai
 
 # LLM dependencies for A-MEM
 litellm
+nltk
 
 # HTTP and async
 aiohttp
