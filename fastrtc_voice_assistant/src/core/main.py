@@ -216,6 +216,16 @@ class VoiceAssistantApplication:
         return status
 
 
+def create_voice_assistant() -> VoiceAssistant:
+    """
+    Factory function to create a configured voice assistant instance.
+    
+    Returns:
+        Configured VoiceAssistant instance
+    """
+    return VoiceAssistant()
+
+
 def create_application() -> VoiceAssistantApplication:
     """
     Factory function to create a configured voice assistant application.

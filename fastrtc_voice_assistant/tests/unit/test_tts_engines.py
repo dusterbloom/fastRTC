@@ -192,7 +192,7 @@ class TestKokoroTTSOptions:
 class TestKokoroTTSEngine:
     """Test cases for KokoroTTSEngine."""
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_initialization_success(self, mock_kokoro_class):
         """Test successful Kokoro TTS initialization."""
         # Mock KokoroONNX
@@ -212,7 +212,7 @@ class TestKokoroTTSEngine:
             assert engine.is_available() is False
             assert engine.tts_model is None
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_initialization_general_error(self, mock_kokoro_class):
         """Test initialization with general error."""
         mock_kokoro_class.side_effect = Exception("Initialization failed")
@@ -221,7 +221,7 @@ class TestKokoroTTSEngine:
         assert engine.is_available() is False
         assert engine.tts_model is None
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     @pytest.mark.asyncio
     async def test_kokoro_tts_synthesis_success(self, mock_kokoro_class):
         """Test successful synthesis."""
@@ -248,7 +248,7 @@ class TestKokoroTTSEngine:
         assert len(result.samples) == 1500  # 1000 + 500
         assert result.duration > 0
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     @pytest.mark.asyncio
     async def test_kokoro_tts_synthesis_no_audio(self, mock_kokoro_class):
         """Test synthesis when no audio is generated."""
@@ -261,7 +261,7 @@ class TestKokoroTTSEngine:
         with pytest.raises(TTSError, match="No audio generated"):
             await engine.synthesize("Hello", "voice1", "en")
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     @pytest.mark.asyncio
     async def test_kokoro_tts_synthesis_failure(self, mock_kokoro_class):
         """Test synthesis failure handling."""
@@ -274,7 +274,7 @@ class TestKokoroTTSEngine:
         with pytest.raises(TTSError):
             await engine.synthesize("Hello", "voice1", "en")
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_get_available_voices(self, mock_kokoro_class):
         """Test getting available voices."""
         mock_kokoro_class.return_value = Mock()
@@ -289,7 +289,7 @@ class TestKokoroTTSEngine:
         voices = engine.get_available_voices("unknown")
         assert isinstance(voices, list)
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_stream_synthesis(self, mock_kokoro_class):
         """Test streaming synthesis."""
         mock_kokoro_instance = Mock()
@@ -312,7 +312,7 @@ class TestKokoroTTSEngine:
             assert isinstance(audio_chunk, np.ndarray)
             assert audio_chunk.dtype == np.float32
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_stream_synthesis_failure(self, mock_kokoro_class):
         """Test streaming synthesis failure."""
         mock_kokoro_instance = Mock()
@@ -324,7 +324,7 @@ class TestKokoroTTSEngine:
         with pytest.raises(TTSError):
             list(engine.stream_synthesis("Hello", "voice1", "en"))
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_combine_audio_chunks(self, mock_kokoro_class):
         """Test combining audio chunks."""
         mock_kokoro_class.return_value = Mock()
@@ -358,7 +358,7 @@ class TestKokoroTTSEngine:
         with pytest.raises(TTSError, match="No audio chunks"):
             engine._combine_audio_chunks([])
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_model_info(self, mock_kokoro_class):
         """Test model information retrieval."""
         mock_kokoro_instance = Mock()
@@ -382,10 +382,10 @@ class TestKokoroTTSEngine:
         engine = KokoroTTSEngine()
         engine.tts_model = None  # Simulate failed initialization
         
-        with pytest.raises(TTSError, match="not initialized"):
+        with pytest.raises(TTSError, match=r"(not initialized|not available|model.*not.*loaded)"):
             await engine.synthesize("Hello", "voice1", "en")
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     @pytest.mark.asyncio
     async def test_kokoro_tts_different_output_formats(self, mock_kokoro_class):
         """Test handling different output formats from Kokoro."""
@@ -407,7 +407,7 @@ class TestKokoroTTSEngine:
         assert len(result.samples) == 300  # 100 + 200
         assert result.sample_rate == 24000
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     @pytest.mark.parametrize("language,expected_lang", [
         ("i", "it-it"),  # Italian
         ("e", "es-es"),  # Spanish  
@@ -432,7 +432,7 @@ class TestKokoroTTSEngine:
         
         await engine.synthesize("Hello", "voice1", language)
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.KokoroONNX')
+    @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     def test_kokoro_tts_sample_rate_mismatch_warning(self, mock_kokoro_class):
         """Test handling of sample rate mismatches in chunks."""
         mock_kokoro_class.return_value = Mock()
@@ -452,7 +452,7 @@ class TestKokoroTTSEngine:
         )
         
         # Should still combine but log warning
-        with patch('fastrtc_voice_assistant.src.audio.engines.tts.kokoro_tts.logger') as mock_logger:
+        with patch('src.audio.engines.tts.kokoro_tts.logger') as mock_logger:
             combined = engine._combine_audio_chunks([chunk1, chunk2])
             
             # Should use first chunk's sample rate

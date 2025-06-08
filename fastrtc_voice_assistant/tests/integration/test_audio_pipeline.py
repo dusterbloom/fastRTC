@@ -8,7 +8,7 @@ import pytest
 import numpy as np
 from unittest.mock import Mock, patch, AsyncMock
 
-from src.core import VoiceAssistant
+from src.core.voice_assistant import VoiceAssistant
 from src.integration import StreamCallbackHandler
 from src.audio import BluetoothAudioProcessor, HuggingFaceSTTEngine, KokoroTTSEngine
 from src.audio import HybridLanguageDetector, VoiceMapper

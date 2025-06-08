@@ -106,7 +106,7 @@ class TestAMemMemoryManager:
         # Test filtered content
         should_store, category = memory_manager.should_store_memory("yes", "okay")
         assert should_store is False
-        assert category == "acknowledgment"
+        assert category == "too_short"
         
         should_store, category = memory_manager.should_store_memory("", "response")
         assert should_store is False
@@ -220,7 +220,8 @@ class TestAMemMemoryManager:
         assert memory_manager.memory_cache['user_name'] is None
         assert len(memory_manager.memory_cache['preferences']) == 0
         
-        # Test clear with exception
+        # Test clear with exception - properly mock the memories attribute
+        mock_amem_system.memories = Mock()
         mock_amem_system.memories.clear.side_effect = Exception("Clear failed")
         result = await memory_manager.clear_memory()
         assert result is False

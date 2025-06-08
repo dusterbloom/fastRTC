@@ -9,7 +9,8 @@ import numpy as np
 from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timezone
 
-from src.core import VoiceAssistant, VoiceAssistantApplication
+from src.core.voice_assistant import VoiceAssistant
+from src.core.main import VoiceAssistantApplication
 from src.integration import StreamCallbackHandler, FastRTCBridge
 from src.utils.async_utils import AsyncEnvironmentManager
 

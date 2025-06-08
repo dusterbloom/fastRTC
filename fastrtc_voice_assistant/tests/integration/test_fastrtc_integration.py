@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 from src.integration import FastRTCBridge, StreamCallbackHandler
-from src.core import VoiceAssistant
+from src.core.voice_assistant import VoiceAssistant
 
 
 class TestFastRTCIntegration:

@@ -53,7 +53,8 @@ class VoiceAssistant:
         response_cache: Optional[ResponseCache] = None,
         conversation_buffer: Optional[ConversationBuffer] = None,
         llm_service: Optional[LLMService] = None,
-        async_manager: Optional[AsyncManager] = None
+        async_manager: Optional[AsyncManager] = None,
+        config: Optional[Dict[str, Any]] = None
     ):
         """
         Initialize the voice assistant with dependency injection.
@@ -69,8 +70,16 @@ class VoiceAssistant:
             conversation_buffer: Conversation tracking buffer
             llm_service: LLM service for response generation
             async_manager: Async operations manager
+            config: Optional configuration dictionary for component settings
         """
         logger.info("🧠 Initializing VoiceAssistant with dependency injection...")
+        
+        # Store configuration
+        self.config = config or {}
+        
+        # Session and user tracking (set early for memory manager)
+        self.user_id = "voice_user_01"
+        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         
         # Initialize or use provided components
         self.audio_processor = audio_processor or BluetoothAudioProcessor()
@@ -85,10 +94,6 @@ class VoiceAssistant:
         
         # Initialize memory manager with Qdrant setup
         self.memory_manager = memory_manager or self._setup_memory_manager()
-        
-        # Session and user tracking
-        self.user_id = "voice_user_01"
-        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         
         # Conversation state
         self.current_language = DEFAULT_LANGUAGE
@@ -214,7 +219,7 @@ class VoiceAssistant:
         # Generate new response using LLM service
         response = await self.llm_service.generate_response(
             user_text,
-            conversation_history=list(self.conversation_buffer.get_recent_messages()),
+            conversation_history=self.conversation_buffer.get_turns(),
             user_id=self.user_id,
             session_id=self.session_id
         )
@@ -273,7 +278,7 @@ class VoiceAssistant:
         Returns:
             Cached response if available, None otherwise
         """
-        return self.response_cache.get(text, ttl_seconds=self.cache_ttl_seconds)
+        return self.response_cache.get(text)
     
     def cache_response(self, text: str, response: str):
         """
@@ -283,7 +288,7 @@ class VoiceAssistant:
             text: Input text (cache key)
             response: Response to cache
         """
-        self.response_cache.set(text, response)
+        self.response_cache.put(text, response)
     
     def get_system_stats(self) -> Dict[str, Any]:
         """

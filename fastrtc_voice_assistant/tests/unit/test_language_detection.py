@@ -113,11 +113,11 @@ class TestMediaPipeLanguageDetector:
     
     def test_mediapipe_detector_initialization_without_mediapipe(self):
         """Test initialization when MediaPipe is not available."""
-        with patch('fastrtc_voice_assistant.src.audio.language.detector.mp', side_effect=ImportError):
+        with patch('src.audio.language.detector.mp', side_effect=ImportError):
             detector = MediaPipeLanguageDetector()
             assert detector.is_available() is False
     
-    @patch('fastrtc_voice_assistant.src.audio.language.detector.mp')
+    @patch('src.audio.language.detector.mp')
     def test_mediapipe_detector_initialization_success(self, mock_mp):
         """Test successful initialization with MediaPipe."""
         # Mock MediaPipe components
@@ -130,7 +130,7 @@ class TestMediaPipeLanguageDetector:
         assert detector._detector == mock_detector
         assert detector.is_available() is True
     
-    @patch('fastrtc_voice_assistant.src.audio.language.detector.mp')
+    @patch('src.audio.language.detector.mp')
     def test_mediapipe_detector_language_detection(self, mock_mp):
         """Test MediaPipe language detection."""
         # Mock detection result
@@ -155,7 +155,7 @@ class TestMediaPipeLanguageDetector:
         assert lang == 'i'  # Italian mapped to Kokoro code
         assert confidence == 0.95
     
-    @patch('fastrtc_voice_assistant.src.audio.language.detector.mp')
+    @patch('src.audio.language.detector.mp')
     def test_mediapipe_detector_no_detections(self, mock_mp):
         """Test behavior when no detections are found."""
         mock_result = Mock()
@@ -174,7 +174,7 @@ class TestMediaPipeLanguageDetector:
         assert lang == DEFAULT_LANGUAGE
         assert confidence == 0.0
     
-    @patch('fastrtc_voice_assistant.src.audio.language.detector.mp')
+    @patch('src.audio.language.detector.mp')
     def test_mediapipe_detector_language_mapping(self, mock_mp):
         """Test language code mapping from MediaPipe to Kokoro."""
         test_mappings = [
@@ -210,7 +210,7 @@ class TestMediaPipeLanguageDetector:
             
             assert lang == expected_kokoro
     
-    @patch('fastrtc_voice_assistant.src.audio.language.detector.mp')
+    @patch('src.audio.language.detector.mp')
     def test_mediapipe_detector_error_handling(self, mock_mp):
         """Test error handling in MediaPipe detection."""
         mock_detector = Mock()
@@ -398,7 +398,8 @@ class TestVoiceMapper:
     
     def test_voice_mapper_add_remove_mapping(self):
         """Test adding and removing voice mappings."""
-        mapper = VoiceMapper(voice_map={})
+        # Start with a minimal voice map that has fallback language
+        mapper = VoiceMapper(voice_map={'a': ['fallback_voice']})
         
         # Add mapping
         mapper.add_voice_mapping('test', ['voice1', 'voice2'])
@@ -407,7 +408,8 @@ class TestVoiceMapper:
         # Remove mapping
         removed = mapper.remove_voice_mapping('test')
         assert removed is True
-        assert mapper.get_voices_for_language('test') == []
+        # After removal, should fallback to default language voices
+        assert mapper.get_voices_for_language('test') == ['fallback_voice']
         
         # Try to remove non-existing
         removed = mapper.remove_voice_mapping('nonexistent')

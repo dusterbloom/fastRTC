@@ -29,6 +29,12 @@ class TestLLMService:
     def mock_http_session(self):
         """Mock HTTP session."""
         session = Mock(spec=aiohttp.ClientSession)
+        # Configure async context manager for post/get methods
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=async_context_mock)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        session.post.return_value = async_context_mock
+        session.get.return_value = async_context_mock
         return session
     
     @pytest.fixture
@@ -174,7 +180,11 @@ class TestLLMService:
         })
         
         mock_session = Mock()
-        mock_session.post.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_session.post.return_value = async_context_mock
         llm_service.http_session = mock_session
         
         messages = [{"role": "user", "content": "Hello"}]
@@ -191,7 +201,11 @@ class TestLLMService:
         mock_response.text = AsyncMock(return_value="Internal server error")
         
         mock_session = Mock()
-        mock_session.post.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_session.post.return_value = async_context_mock
         llm_service.http_session = mock_session
         
         messages = [{"role": "user", "content": "Hello"}]
@@ -210,7 +224,11 @@ class TestLLMService:
         })
         
         mock_session = Mock()
-        mock_session.post.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_session.post.return_value = async_context_mock
         llm_service.http_session = mock_session
         
         messages = [{"role": "user", "content": "Hello"}]
@@ -227,7 +245,11 @@ class TestLLMService:
         mock_response.text = AsyncMock(return_value="Bad request")
         
         mock_session = Mock()
-        mock_session.post.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_session.post.return_value = async_context_mock
         llm_service.http_session = mock_session
         
         messages = [{"role": "user", "content": "Hello"}]
@@ -274,7 +296,11 @@ class TestLLMService:
         mock_response.status = 200
         
         mock_session = Mock()
-        mock_session.get.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_session.get.return_value = async_context_mock
         llm_service.http_session = mock_session
         
         is_healthy = await llm_service.health_check()
@@ -289,7 +315,11 @@ class TestLLMService:
         mock_response.status = 200
         
         mock_session = Mock()
-        mock_session.get.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_session.get.return_value = async_context_mock
         llm_service.http_session = mock_session
         
         is_healthy = await llm_service.health_check()
@@ -351,8 +381,8 @@ class TestLLMService:
         # Should complete without error
     
     @pytest.mark.asyncio
-    async def test_full_response_flow(self, llm_service, mock_http_session, 
-                                    mock_response_cache, mock_conversation_buffer, 
+    async def test_full_response_flow(self, llm_service, mock_http_session,
+                                    mock_response_cache, mock_conversation_buffer,
                                     mock_memory_manager):
         """Test full response generation flow."""
         await llm_service.initialize(
@@ -369,7 +399,11 @@ class TestLLMService:
             "message": {"content": "Hello! How can I help you today?"}
         })
         
-        mock_http_session.post.return_value.__aenter__.return_value = mock_response
+        # Configure async context manager for the fixture mock
+        async_context_mock = AsyncMock()
+        async_context_mock.__aenter__ = AsyncMock(return_value=mock_response)
+        async_context_mock.__aexit__ = AsyncMock(return_value=None)
+        mock_http_session.post.return_value = async_context_mock
         
         response = await llm_service.get_response("Hello there", "User context")
         

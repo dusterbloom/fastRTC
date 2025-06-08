@@ -132,10 +132,10 @@ class TestBaseSTTEngine:
 class TestHuggingFaceSTTEngine:
     """Test cases for HuggingFaceSTTEngine."""
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.torch')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.torch')
     def test_huggingface_stt_initialization_success(self, mock_torch, mock_pipeline, mock_processor, mock_model):
         """Test successful HuggingFace STT initialization."""
         # Mock torch and device detection
@@ -161,7 +161,7 @@ class TestHuggingFaceSTTEngine:
         assert engine.pipeline == mock_pipeline_instance
         assert engine.is_available() is True
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
     def test_huggingface_stt_initialization_failure(self, mock_model):
         """Test HuggingFace STT initialization failure."""
         # Mock model loading failure
@@ -170,10 +170,10 @@ class TestHuggingFaceSTTEngine:
         with pytest.raises(STTError):
             HuggingFaceSTTEngine()
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.torch')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.torch')
     @pytest.mark.asyncio
     async def test_huggingface_stt_transcription(self, mock_torch, mock_pipeline, mock_processor, mock_model):
         """Test HuggingFace STT transcription."""
@@ -206,10 +206,10 @@ class TestHuggingFaceSTTEngine:
         assert result.text == "Hello world"
         assert result.language == "en"
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.torch')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.torch')
     @pytest.mark.asyncio
     async def test_huggingface_stt_transcription_with_chunks(self, mock_torch, mock_pipeline, mock_processor, mock_model):
         """Test transcription with chunk information."""
@@ -242,10 +242,10 @@ class TestHuggingFaceSTTEngine:
         assert result.chunks is not None
         assert len(result.chunks) == 2
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.torch')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.torch')
     @pytest.mark.asyncio
     async def test_huggingface_stt_transcription_failure(self, mock_torch, mock_pipeline, mock_processor, mock_model):
         """Test transcription failure handling."""
@@ -269,10 +269,10 @@ class TestHuggingFaceSTTEngine:
         with pytest.raises(STTError):
             await engine.transcribe(audio)
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.get_device')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.get_device')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
     def test_huggingface_stt_device_detection(self, mock_pipeline, mock_processor, mock_model, mock_get_device):
         """Test device detection logic."""
         # Test different device scenarios
@@ -292,10 +292,10 @@ class TestHuggingFaceSTTEngine:
             
             assert engine.device == expected_device
     
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.torch')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.torch')
     def test_huggingface_stt_model_info(self, mock_torch, mock_pipeline, mock_processor, mock_model):
         """Test model information retrieval."""
         mock_torch.cuda.is_available.return_value = True
@@ -313,10 +313,10 @@ class TestHuggingFaceSTTEngine:
         assert info['pipeline_loaded'] is True
     
     @pytest.mark.parametrize("dtype", [np.float32, np.float64, np.int16])
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.AutoProcessor')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.pipeline')
-    @patch('fastrtc_voice_assistant.src.audio.engines.stt.huggingface_stt.torch')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoModelForSpeechSeq2Seq')
+    @patch('src.audio.engines.stt.huggingface_stt.AutoProcessor')
+    @patch('src.audio.engines.stt.huggingface_stt.pipeline')
+    @patch('src.audio.engines.stt.huggingface_stt.torch')
     @pytest.mark.asyncio
     async def test_huggingface_stt_dtype_handling(self, mock_torch, mock_pipeline, mock_processor, mock_model, dtype):
         """Test handling of different audio data types."""

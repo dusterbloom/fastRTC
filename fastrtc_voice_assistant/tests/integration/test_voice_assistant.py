@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from collections import deque
 
-from src.core import VoiceAssistant
+from src.core.voice_assistant import VoiceAssistant
 from src.audio import BluetoothAudioProcessor, HuggingFaceSTTEngine, KokoroTTSEngine
 from src.audio import HybridLanguageDetector, VoiceMapper
 from src.memory import AMemMemoryManager, ResponseCache, ConversationBuffer

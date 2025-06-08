@@ -215,8 +215,8 @@ class TestConversationBuffer:
         stats = conversation_buffer.get_stats()
         assert stats['current_turns'] == 2
         assert stats['total_turns_processed'] == 2
-        assert stats['avg_user_words_per_turn'] == "2.0"  # (3 + 2) / 2
-        assert stats['avg_assistant_words_per_turn'] == "4.0"  # (5 + 3) / 2
+        assert stats['avg_user_words_per_turn'] == "2.5"  # (3 + 2) / 2 = 2.5
+        assert stats['avg_assistant_words_per_turn'] == "4.0"  # (5 + 3) / 2 = 4.0
         assert "en" in stats['languages_used']
         assert stats['language_distribution']['en'] == 2
         assert stats['buffer_utilization'] == "40.0%"  # 2/5 * 100
