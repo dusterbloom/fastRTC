@@ -1,0 +1,404 @@
+{
+  "system_info": {
+    "cpu": "20 cores @ 0MHz",
+    "memory_gb": 31.230804443359375,
+    "gpu": "CUDA",
+    "gpu_name": "NVIDIA GeForce RTX 3090"
+  },
+  "timestamp": 1749322183.798999,
+  "results": [
+    {
+      "component": "AudioProc",
+      "operation": "process_0.5s",
+      "duration_ms": 0.10664801811799407,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 0.5,
+        "samples_per_ms": 75013.11455360471,
+        "processing_ratio": 0.00021329603623598814
+      }
+    },
+    {
+      "component": "AudioProc",
+      "operation": "process_1.0s",
+      "duration_ms": 0.11143001029267907,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 1.0,
+        "samples_per_ms": 143587.88945612434,
+        "processing_ratio": 0.00011143001029267907
+      }
+    },
+    {
+      "component": "AudioProc",
+      "operation": "process_2.0s",
+      "duration_ms": 0.12098898878321052,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 2.0,
+        "samples_per_ms": 264486.8786971844,
+        "processing_ratio": 6.049449439160526e-05
+      }
+    },
+    {
+      "component": "AudioProc",
+      "operation": "process_5.0s",
+      "duration_ms": 0.17557499813847244,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 5.0,
+        "samples_per_ms": 455645.7402716623,
+        "processing_ratio": 3.5114999627694486e-05
+      }
+    },
+    {
+      "component": "AudioProc",
+      "operation": "process_silence",
+      "duration_ms": 0.11190300574526191,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 1.0,
+        "samples_per_ms": 142980.96725321838,
+        "processing_ratio": 0.00011190300574526191
+      }
+    },
+    {
+      "component": "AudioProc",
+      "operation": "process_noise",
+      "duration_ms": 0.12331901234574616,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 1.0,
+        "samples_per_ms": 129744.795191363,
+        "processing_ratio": 0.00012331901234574616
+      }
+    },
+    {
+      "component": "STT",
+      "operation": "model_loading",
+      "duration_ms": 3825.578587013297,
+      "memory_mb": 0,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "STT",
+      "operation": "warmup",
+      "duration_ms": 3382.989464007551,
+      "memory_mb": 791.484375,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "STT",
+      "operation": "transcribe_0.5s",
+      "duration_ms": 11311.652468022658,
+      "memory_mb": 22.921875,
+      "success": true,
+      "details": {
+        "audio_length": 0.5,
+        "transcription": " . . . . . . . . . . . . . . . . . . . . . . . . ."
+      }
+    },
+    {
+      "component": "STT",
+      "operation": "transcribe_1.0s",
+      "duration_ms": 293.0572170007508,
+      "memory_mb": 6.0,
+      "success": true,
+      "details": {
+        "audio_length": 1.0,
+        "transcription": " There we go."
+      }
+    },
+    {
+      "component": "STT",
+      "operation": "transcribe_2.0s",
+      "duration_ms": 262.84080499317497,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 2.0,
+        "transcription": " . . ."
+      }
+    },
+    {
+      "component": "STT",
+      "operation": "transcribe_5.0s",
+      "duration_ms": 337.03961002174765,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 5.0,
+        "transcription": " . . ."
+      }
+    },
+    {
+      "component": "STT",
+      "operation": "transcribe_noise",
+      "duration_ms": 287.140490981983,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "audio_length": 1.0,
+        "transcription": " Okay."
+      }
+    },
+    {
+      "component": "LangDetect",
+      "operation": "detect_en",
+      "duration_ms": 0.008069997420534492,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "input_text": "Hello, how are you doing today",
+        "detected_lang": "a",
+        "expected_lang": "a"
+      }
+    },
+    {
+      "component": "LangDetect",
+      "operation": "detect_it",
+      "duration_ms": 0.010956980986520648,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "input_text": "Ciao, come stai oggi? Tutto be",
+        "detected_lang": "i",
+        "expected_lang": "i"
+      }
+    },
+    {
+      "component": "LangDetect",
+      "operation": "detect_es",
+      "duration_ms": 0.007889990229159594,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "input_text": "Hola, \u00bfc\u00f3mo est\u00e1s hoy?",
+        "detected_lang": "a",
+        "expected_lang": "e"
+      }
+    },
+    {
+      "component": "LangDetect",
+      "operation": "detect_fr",
+      "duration_ms": 0.008431001333519816,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "input_text": "Bonjour, comment allez-vous au",
+        "detected_lang": "f",
+        "expected_lang": "f"
+      }
+    },
+    {
+      "component": "LLM",
+      "operation": "request_1",
+      "duration_ms": 1.9279190164525062,
+      "memory_mb": 0.0,
+      "success": false,
+      "details": {
+        "prompt": "Hello, how are you?",
+        "response": "error",
+        "tokens_estimated": 5.2
+      }
+    },
+    {
+      "component": "LLM",
+      "operation": "request_2",
+      "duration_ms": 0.020424980903044343,
+      "memory_mb": 0.0,
+      "success": false,
+      "details": {
+        "prompt": "Tell me about philos",
+        "response": "error",
+        "tokens_estimated": 5.2
+      }
+    },
+    {
+      "component": "LLM",
+      "operation": "request_3",
+      "duration_ms": 0.02106200554408133,
+      "memory_mb": 0.0,
+      "success": false,
+      "details": {
+        "prompt": "What's the weather l",
+        "response": "error",
+        "tokens_estimated": 5.2
+      }
+    },
+    {
+      "component": "LLM",
+      "operation": "request_4",
+      "duration_ms": 0.021594983991235495,
+      "memory_mb": 0.0,
+      "success": false,
+      "details": {
+        "prompt": "Explain quantum comp",
+        "response": "error",
+        "tokens_estimated": 7.800000000000001
+      }
+    },
+    {
+      "component": "LLM",
+      "operation": "request_5",
+      "duration_ms": 0.021274987375363708,
+      "memory_mb": 0.0,
+      "success": false,
+      "details": {
+        "prompt": "What's the meaning o",
+        "response": "error",
+        "tokens_estimated": 6.5
+      }
+    },
+    {
+      "component": "Memory",
+      "operation": "cache_hit",
+      "duration_ms": 0.0008809729479253292,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "Memory",
+      "operation": "cache_miss",
+      "duration_ms": 1.1847770074382424,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "Memory",
+      "operation": "memory_search",
+      "duration_ms": 5.0818859890569,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "Memory",
+      "operation": "memory_store",
+      "duration_ms": 3.211533010471612,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "Memory",
+      "operation": "language_cache",
+      "duration_ms": 0.0009500072337687016,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": null
+    },
+    {
+      "component": "TTS",
+      "operation": "synthesis_short",
+      "duration_ms": 110.15097599010915,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "text_length": 5,
+        "estimated_audio_duration": 0.4,
+        "char_per_sec": 45.39224419081832
+      }
+    },
+    {
+      "component": "TTS",
+      "operation": "synthesis_medium",
+      "duration_ms": 154.31107301265,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "text_length": 27,
+        "estimated_audio_duration": 2.16,
+        "char_per_sec": 174.9712413560018
+      }
+    },
+    {
+      "component": "TTS",
+      "operation": "synthesis_long",
+      "duration_ms": 366.55549801071174,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "text_length": 133,
+        "estimated_audio_duration": 10.64,
+        "char_per_sec": 362.8372803621496
+      }
+    },
+    {
+      "component": "TTS",
+      "operation": "synthesis_very_long",
+      "duration_ms": 610.6926099746488,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "text_length": 255,
+        "estimated_audio_duration": 20.400000000000002,
+        "char_per_sec": 417.5586798251671
+      }
+    },
+    {
+      "component": "EndToEnd",
+      "operation": "quick_response",
+      "duration_ms": 195.61257099849172,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "stt_ms": 100.15960701275617,
+        "lang_detect_ms": 2.0658659923356026,
+        "llm_ms": 50.091684999642894,
+        "memory_ms": 3.0774640035815537,
+        "tts_ms": 40.16472297371365,
+        "total_ms": 195.55934498202987,
+        "audio_duration": 1.0,
+        "response_length": 5,
+        "realtime_factor": 0.19555934498202987
+      }
+    },
+    {
+      "component": "EndToEnd",
+      "operation": "normal_response",
+      "duration_ms": 475.9435009909794,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "stt_ms": 200.38602899876423,
+        "lang_detect_ms": 2.0884799887426198,
+        "llm_ms": 150.20620901486836,
+        "memory_ms": 3.0752150050830096,
+        "tts_ms": 120.15863801934756,
+        "total_ms": 475.9145710268058,
+        "audio_duration": 2.0,
+        "response_length": 15,
+        "realtime_factor": 0.2379572855134029
+      }
+    },
+    {
+      "component": "EndToEnd",
+      "operation": "long_response",
+      "duration_ms": 1224.8533560195938,
+      "memory_mb": 0.0,
+      "success": true,
+      "details": {
+        "stt_ms": 500.55500798043795,
+        "lang_detect_ms": 2.111138019245118,
+        "llm_ms": 350.53395200520754,
+        "memory_ms": 3.1107850081752986,
+        "tts_ms": 368.49399100174196,
+        "total_ms": 1224.8048740148079,
+        "audio_duration": 5.0,
+        "response_length": 46,
+        "realtime_factor": 0.24496097480296158
+      }
+    }
+  ]
+}
