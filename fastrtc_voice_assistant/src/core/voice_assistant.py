@@ -299,12 +299,16 @@ class VoiceAssistant:
         language, confidence = self.language_detector.detect_language(text)
         logger.debug(f"Language detection: {language} (confidence: {confidence:.3f})")
         
-        # Convert to Kokoro language code if needed
-        kokoro_language = self.convert_to_kokoro_language(language)
-        if kokoro_language != language:
+        # Check if language is already in Kokoro format (single letter)
+        if len(language) == 1:
+            # Already in Kokoro format, return as-is
+            logger.debug(f"Language already in Kokoro format: {language}")
+            return language
+        else:
+            # Convert to Kokoro language code
+            kokoro_language = self.convert_to_kokoro_language(language)
             logger.debug(f"Language mapping: {language} → {kokoro_language}")
-        
-        return kokoro_language
+            return kokoro_language
     
     def convert_to_kokoro_language(self, language_code: str) -> str:
         """

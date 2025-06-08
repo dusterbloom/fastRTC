@@ -289,16 +289,10 @@ def voice_assistant_callback_rt(audio_data_tuple: tuple):
                 # Extract text and language from enhanced STT result
                 if hasattr(transcription_result, 'text'):
                     user_text = transcription_result.text.strip()
-                    # Use enhanced language detection from STT engine
-                    if hasattr(transcription_result, 'language') and transcription_result.language:
-                        raw_language = transcription_result.language
-                        # Convert to Kokoro format immediately
-                        detected_language = voice_assistant.convert_to_kokoro_language(raw_language)
-                        logger.info(f"🌍 Language detected by enhanced STT: {raw_language} → {detected_language}")
-                    else:
-                        # Fallback to text-based detection (already returns Kokoro format)
-                        detected_language = voice_assistant.detect_language_from_text(user_text)
-                        logger.info(f"🌍 Language detected by fallback: {detected_language}")
+                    # FIXED: Use MediaPipe language detection ONLY (ignore STT language detection)
+                    logger.info(f"🔧 Language Debug: Ignoring STT language detection, using MediaPipe only")
+                    detected_language = voice_assistant.detect_language_from_text(user_text)
+                    logger.info(f"🌍 Language detected by MediaPipe: {detected_language}")
                 else:
                     # Error case - use string directly
                     user_text = str(transcription_result).strip()
