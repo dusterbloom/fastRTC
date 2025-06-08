@@ -34,7 +34,7 @@ class LLMService(LLMServiceInterface):
                  lm_studio_url: str = "http://localhost:1234/v1",
                  lm_studio_model: str = "lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF",
                  timeout: float = 30.0,
-                 max_tokens: int = 250,
+                 max_tokens: int = 1024,
                  temperature: float = 0.7):
         """Initialize the LLM service.
         
@@ -72,6 +72,7 @@ class LLMService(LLMServiceInterface):
         }
         
         logger.info(f"LLM service initialized with backend: {'Ollama' if use_ollama else 'LM Studio'}")
+        logger.info(f"🔧 LLM Debug: max_tokens={self.max_tokens}, temperature={self.temperature}, timeout={self.timeout}")
     
     async def initialize(self, http_session: aiohttp.ClientSession,
                         response_cache: Optional[ResponseCache] = None,
@@ -287,6 +288,9 @@ class LLMService(LLMServiceInterface):
                 content = data.get("message", {}).get("content", "").strip()
                 if not content:
                     raise LLMError("Empty response from Ollama")
+                
+                # Log response length for debugging
+                logger.info(f"🔧 LLM Debug: Ollama response length: {len(content)} chars, ~{len(content.split())} words")
                 return content
             else:
                 error_body = await response.text()
@@ -328,6 +332,9 @@ class LLMService(LLMServiceInterface):
                 content = choices[0].get("message", {}).get("content", "").strip()
                 if not content:
                     raise LLMError("Empty response from LM Studio")
+                
+                # Log response length for debugging
+                logger.info(f"🔧 LLM Debug: LM Studio response length: {len(content)} chars, ~{len(content.split())} words")
                 return content
             else:
                 error_body = await response.text()
