@@ -20,7 +20,7 @@ from ..utils.logging import get_logger
 
 # A-MEM imports
 try:
-    from ..a_mem.memory_system import MemorySystem as AgenticMemorySystem
+    from ..a_mem.memory_system import AgenticMemorySystem
 except ImportError:
     AgenticMemorySystem = None
 
@@ -211,6 +211,8 @@ class AMemMemoryManager(MemoryManager):
                         logger.info(f"📚 Loading {len(results['ids'])} memories from ChromaDB...")
                         self.amem_system._load_memories_from_chromadb()
                         all_memories = list(self.amem_system.memories.values())
+                        # Increment memory operations counter for loading memories
+                        self.memory_operations += 1
                 except Exception as e:
                     logger.warning(f"⚠️ Error accessing ChromaDB: {e}")
                     return
@@ -336,55 +338,28 @@ class AMemMemoryManager(MemoryManager):
         """
         user_lower = user_text.lower().strip()
         
-        # Filter out empty or very short inputs
         if len(user_lower) == 0:
             return False, "empty_input"
         if len(user_lower) <= 3 and not user_lower.startswith("my name is"):
             return False, "too_short"
-        
-        # Filter out common transient responses
-        common_transient = [
-            'yes', 'no', 'ok', 'okay', 'thanks', 'thank you', 
-            'um', 'uh', 'got it', 'good', 'fine', 'alright'
-        ]
+
+        common_transient = ['yes', 'no', 'ok', 'okay', 'thanks', 'thank you', 'um', 'uh', 'got it', 'good', 'fine', 'alright']
         if user_lower in common_transient:
             return False, "acknowledgment"
-        
         if user_lower.startswith("and ") and len(user_lower.split()) < 4:
             return False, "minor_continuation"
-        
-        # Check for personal information
-        personal_patterns = [
-            'my name is', 'i am ', 'call me ', 'i live in', 
-            'i work at', 'i was born in'
-        ]
-        if any(p in user_lower for p in personal_patterns):
+
+        # Check personal info patterns
+        if any(p in user_lower for p in ['my name is', 'i am ', 'call me ']):
             return True, "personal_info"
-        
-        # Check for preferences
-        preference_patterns = [
-            'i like', 'i love', 'i hate', 'my favorite', 
-            'i prefer', 'i dislike'
-        ]
-        if any(p in user_lower for p in preference_patterns):
+        if any(p in user_lower for p in ['i live in', 'i work at', 'i was born in']):
+            return True, "personal_info"
+        if any(p in user_lower for p in ['i like', 'i love', 'i hate', 'my favorite', 'i prefer', 'i dislike']):
             return True, "preference"
-        
-        # Check for explicit memory requests
-        memory_patterns = [
-            'remember this', 'don\'t forget', 'important to know', 'make a note'
-        ]
-        if any(p in user_lower for p in memory_patterns):
+        if any(p in user_lower for p in ['remember this', 'don\'t forget', 'important to know', 'make a note']):
             return True, "important"
-        
-        # Filter out recall requests
-        recall_patterns = [
-            'what do you remember', 'what do you know about me', 
-            'tell me about yourself'
-        ]
-        if any(p in user_lower for p in recall_patterns):
+        if any(p in user_lower for p in ['what do you remember', 'what do you know about me', 'tell me about yourself']):
             return False, "recall_request"
-        
-        # Store longer conversations
         if len(user_text.split()) > 7:
             return True, "conversation_turn"
         
@@ -453,6 +428,9 @@ class AMemMemoryManager(MemoryManager):
         Raises:
             MemoryError: If memory storage fails
         """
+        # Always increment memory operations counter, even if we don't store
+        self.memory_operations += 1
+        
         should_store, category = self.should_store_memory(user_text, assistant_text)
         if not should_store:
             return None
@@ -464,12 +442,11 @@ class AMemMemoryManager(MemoryManager):
         else:
             logger.warning("⚠️ Memory queue not available, attempting direct threaded storage (fallback).")
             threading.Thread(
-                target=self._store_memory_background, 
-                args=(user_text, assistant_text, category), 
+                target=self._store_memory_background,
+                args=(user_text, assistant_text, category),
                 daemon=True
             ).start()
         
-        self.memory_operations += 1
         return category
     
     def _store_memory_background(self, user_text: str, assistant_text: str, category: str):
@@ -546,6 +523,9 @@ class AMemMemoryManager(MemoryManager):
         Raises:
             MemoryError: If memory search fails
         """
+        # Increment memory operations counter for search
+        self.memory_operations += 1
+        
         query_lower = query.lower()
         
         # Handle name queries from cache
@@ -595,6 +575,38 @@ class AMemMemoryManager(MemoryManager):
             return results
         except Exception as e:
             logger.error(f"❌ A-MEM search (sync call) failed for query '{query}': {e}")
+            return []
+    
+    async def get_memories(self, limit: int = 10) -> list:
+        """Get recent memories from the A-MEM system.
+        
+        Args:
+            limit: Maximum number of memories to return
+            
+        Returns:
+            list: List of memory objects
+        """
+        # Increment memory operations counter for getting memories
+        self.memory_operations += 1
+        
+        try:
+            # Get all memories and return the most recent ones
+            all_memories = list(self.amem_system.memories.values())
+            
+            # Sort by timestamp if available, otherwise return as-is
+            try:
+                sorted_memories = sorted(
+                    all_memories,
+                    key=lambda m: self._parse_timestamp(getattr(m, 'timestamp', None)),
+                    reverse=True
+                )
+                return sorted_memories[:limit]
+            except Exception:
+                # If sorting fails, just return the first 'limit' memories
+                return all_memories[:limit]
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get memories: {e}")
             return []
     
     def get_stats(self) -> Dict[str, Any]:

@@ -154,6 +154,49 @@ class VoiceAssistantApplication:
             traceback.print_exc()
             self.shutdown()
     
+    async def start(self):
+        """Start the application asynchronously."""
+        if self.is_running:
+            logger.warning("Application is already running")
+            return
+        
+        # Initialize if not already done
+        if not self.voice_assistant:
+            success = await self.initialize()
+            if not success:
+                raise RuntimeError("Failed to initialize application")
+        
+        # Start the async environment manager
+        if self.async_env_manager:
+            await self.async_env_manager.start()
+        
+        self.is_running = True
+        logger.info("✅ Application started successfully")
+    
+    async def stop(self):
+        """Stop the application asynchronously."""
+        if not self.is_running:
+            return
+        
+        logger.info("🏁 Starting application shutdown sequence...")
+        self.is_running = False
+        
+        try:
+            # Stop FastRTC stream
+            if self.fastrtc_bridge:
+                logger.info("🛑 Stopping FastRTC stream...")
+                self.fastrtc_bridge.stop_stream()
+            
+            # Stop async environment manager
+            if self.async_env_manager:
+                logger.info("⚡ Stopping async environment...")
+                await self.async_env_manager.stop()
+            
+            logger.info("👋 Voice assistant shutdown complete")
+            
+        except Exception as e:
+            logger.error(f"❌ Error during shutdown: {e}")
+    
     def shutdown(self):
         """Shutdown the application gracefully."""
         if not self.is_running:
@@ -226,7 +269,7 @@ def create_voice_assistant() -> VoiceAssistant:
     return VoiceAssistant()
 
 
-def create_application() -> VoiceAssistantApplication:
+async def create_application() -> VoiceAssistantApplication:
     """
     Factory function to create a configured voice assistant application.
     
@@ -242,7 +285,7 @@ def create_application() -> VoiceAssistantApplication:
 
 async def main_async():
     """Async main function for the voice assistant application."""
-    app = create_application()
+    app = await create_application()
     
     # Initialize the application
     success = await app.initialize()

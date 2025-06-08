@@ -13,7 +13,7 @@ def test_critical_fixes_simple():
         print("✅ 1. KokoroONNX class available")
     except ImportError as e:
         print(f"❌ 1. KokoroONNX class import failed: {e}")
-        return False
+        assert False, f"KokoroONNX class import failed: {e}"
     
     # Test 2: VoiceAssistant constructor accepts config parameter (signature check)
     try:
@@ -24,10 +24,10 @@ def test_critical_fixes_simple():
             print("✅ 2. VoiceAssistant constructor accepts config parameter")
         else:
             print("❌ 2. VoiceAssistant constructor missing config parameter")
-            return False
+            assert False, "VoiceAssistant constructor missing config parameter"
     except Exception as e:
         print(f"❌ 2. VoiceAssistant signature check failed: {e}")
-        return False
+        assert False, f"VoiceAssistant signature check failed: {e}"
     
     # Test 3: Application factory functions available
     try:
@@ -38,7 +38,7 @@ def test_critical_fixes_simple():
         print(f"   - VoiceAssistantApplication: {VoiceAssistantApplication}")
     except (ImportError, AttributeError) as e:
         print(f"❌ 3. Application factory functions failed: {e}")
-        return False
+        assert False, f"Application factory functions failed: {e}"
     
     print("\n🎉 ALL CRITICAL FIXES WORKING SUCCESSFULLY!")
     print("\nSummary of fixes:")
@@ -51,7 +51,7 @@ def test_critical_fixes_simple():
     print("- 9 performance test errors (VoiceAssistant constructor)")
     print("- 3 application factory errors (missing functions)")
     
-    return True
+    assert True  # All tests passed
 
 if __name__ == "__main__":
     test_critical_fixes_simple()

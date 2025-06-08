@@ -314,24 +314,38 @@ class TestApplicationIntegration:
     @pytest.fixture
     def mock_application_dependencies(self):
         """Mock all application dependencies."""
-        with patch('src.core.main.create_voice_assistant') as mock_create_va, \
-             patch('src.integration.fastrtc_bridge.FastRTCBridge') as mock_bridge, \
-             patch('src.services.async_manager.AsyncManager') as mock_async_mgr:
+        with patch('src.core.main.VoiceAssistant') as mock_va_class, \
+             patch('src.core.main.FastRTCBridge') as mock_bridge_class, \
+             patch('src.core.main.AsyncEnvironmentManager') as mock_async_mgr_class, \
+             patch('src.core.main.StreamCallbackHandler') as mock_callback_class:
             
-            # Configure mocks
+            # Configure VoiceAssistant mock
             mock_va = AsyncMock()
-            mock_create_va.return_value = mock_va
+            mock_va.stt_engine = AsyncMock()
+            mock_va.tts_engine = AsyncMock()
+            mock_va.language_detector = AsyncMock()
+            mock_va.voice_mapper = AsyncMock()
+            mock_va_class.return_value = mock_va
             
+            # Configure FastRTCBridge mock
             mock_bridge_instance = AsyncMock()
-            mock_bridge.return_value = mock_bridge_instance
+            mock_bridge_class.return_value = mock_bridge_instance
             
+            # Configure AsyncEnvironmentManager mock
             mock_async_mgr_instance = AsyncMock()
-            mock_async_mgr.return_value = mock_async_mgr_instance
+            mock_async_mgr_instance.setup_async_environment.return_value = True
+            mock_async_mgr_instance.get_event_loop.return_value = AsyncMock()
+            mock_async_mgr_class.return_value = mock_async_mgr_instance
+            
+            # Configure StreamCallbackHandler mock
+            mock_callback_instance = AsyncMock()
+            mock_callback_class.return_value = mock_callback_instance
             
             yield {
                 "voice_assistant": mock_va,
                 "bridge": mock_bridge_instance,
-                "async_manager": mock_async_mgr_instance
+                "async_manager": mock_async_mgr_instance,
+                "callback_handler": mock_callback_instance
             }
     
     @pytest.mark.asyncio
@@ -386,6 +400,55 @@ class TestApplicationIntegration:
 class TestSystemPerformanceIntegration:
     """Integration tests focusing on system-wide performance."""
     
+    @pytest.fixture
+    def mock_system_components(self):
+        """Create comprehensive mock system components."""
+        # Mock STT Engine
+        mock_stt = AsyncMock()
+        mock_stt.transcribe.return_value = TranscriptionResult(
+            text="Hello, how are you today?",
+            language="en",
+            confidence=0.95
+        )
+        
+        # Mock TTS Engine
+        mock_tts = AsyncMock()
+        mock_tts.synthesize.return_value = create_test_audio(duration=2.0)
+        mock_tts.get_available_voices.return_value = ["af_heart", "af_alloy", "af_bella"]
+        
+        # Mock Audio Processor
+        mock_processor = Mock()
+        mock_processor.process.return_value = create_test_audio(duration=1.0)
+        
+        # Mock Memory Manager
+        mock_memory = AsyncMock()
+        mock_memory.get_user_context.return_value = "User prefers casual conversation."
+        mock_memory.add_memory.return_value = "memory_id_123"
+        mock_memory.search_memories.return_value = "Previous conversation about weather."
+        
+        # Mock LLM Service
+        mock_llm = AsyncMock()
+        mock_llm.generate_response.return_value = "I'm doing well, thank you for asking! How can I help you today?"
+        
+        return {
+            "stt": mock_stt,
+            "tts": mock_tts,
+            "processor": mock_processor,
+            "memory": mock_memory,
+            "llm": mock_llm
+        }
+    
+    @pytest.fixture
+    def voice_assistant_system(self, mock_system_components):
+        """Create complete voice assistant system."""
+        return VoiceAssistant(
+            stt_engine=mock_system_components["stt"],
+            tts_engine=mock_system_components["tts"],
+            audio_processor=mock_system_components["processor"],
+            memory_manager=mock_system_components["memory"],
+            llm_service=mock_system_components["llm"]
+        )
+    
     @pytest.mark.asyncio
     async def test_end_to_end_latency_measurement(self, voice_assistant_system, mock_system_components):
         """Measure end-to-end latency for complete system."""
@@ -409,10 +472,10 @@ class TestSystemPerformanceIntegration:
         mock_system_components["tts"].synthesize.side_effect = delayed_tts
         
         # Measure end-to-end latency
-        audio = create_test_audio(duration=2.0)
+        test_text = "Test input for latency measurement"
         
         start_time = time.time()
-        response = await voice_assistant_system.process_audio_turn(audio)
+        response = await voice_assistant_system.process_audio_turn(test_text)
         end_time = time.time()
         
         total_latency = end_time - start_time
@@ -437,8 +500,8 @@ class TestSystemPerformanceIntegration:
         
         # Process multiple audio samples
         for i in range(10):
-            audio = create_test_audio(duration=1.0 + i * 0.1)  # Varying durations
-            response = await voice_assistant_system.process_audio_turn(audio)
+            test_text = f"Test audio sample {i+1}"
+            response = await voice_assistant_system.process_audio_turn(test_text)
             assert response is not None
         
         # Final measurements

@@ -57,7 +57,21 @@ class AsyncManager(AsyncLifecycleManagerInterface):
         
         logger.info("Async manager initialized")
     
-    def register_component(self, 
+    async def initialize(self):
+        """Initialize the async manager (async version of setup)."""
+        logger.info("🔧 Initializing async manager...")
+        # This method can be used for any async initialization
+        # Currently, the main setup is done in setup_async_environment
+        logger.info("✅ Async manager initialization complete")
+    
+    async def cleanup(self):
+        """Cleanup async manager resources."""
+        logger.info("🧹 Cleaning up async manager...")
+        # Shutdown all components
+        await self.shutdown()
+        logger.info("✅ Async manager cleanup complete")
+    
+    def register_component(self,
                           name: str, 
                           instance: Any,
                           startup_func: Optional[Callable] = None,

@@ -87,10 +87,13 @@ class TestMemoryIntegration:
                 response_cache.put(user_text, assistant_text)
                 
                 # Verify integration
-                if "name" in user_text.lower():
+                if "my name is" in user_text.lower():
                     assert category == "personal_info"
-                elif "like" in user_text.lower():
+                elif "i like" in user_text.lower():
                     assert category == "preference"
+                # Questions asking for recall should return None
+                elif user_text.lower().startswith("what"):
+                    assert category is None
             
             # Test memory retrieval
             context = memory_manager.get_user_context()

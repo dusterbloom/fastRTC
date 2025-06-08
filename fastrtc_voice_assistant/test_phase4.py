@@ -14,6 +14,7 @@ import asyncio
 import sys
 import traceback
 from pathlib import Path
+import pytest
 
 def test_phase4_imports():
     """Test all Phase 4 component imports."""
@@ -41,12 +42,12 @@ def test_phase4_imports():
         from src.memory import AMemMemoryManager
         print("✅ A-MEM Memory Manager imported")
         
-        return True
+        assert True  # All imports successful
         
     except Exception as e:
         print(f"❌ Import error: {e}")
         traceback.print_exc()
-        return False
+        assert False, f"Import error: {e}"
 
 def test_phase4_initialization():
     """Test Phase 4 component initialization."""
@@ -67,13 +68,14 @@ def test_phase4_initialization():
         async_utils = AsyncUtils()
         print("✅ Async Utils initialized")
         
-        return True
+        assert True  # All initialization successful
         
     except Exception as e:
         print(f"❌ Initialization error: {e}")
         traceback.print_exc()
-        return False
+        assert False, f"Initialization error: {e}"
 
+@pytest.mark.asyncio
 async def test_phase4_async_operations():
     """Test Phase 4 async operations."""
     print("\n🧪 Testing Phase 4 async operations...")
@@ -95,12 +97,12 @@ async def test_phase4_async_operations():
         else:
             print("⚠️ Async environment setup returned False")
         
-        return True
+        assert True  # Async operations successful
         
     except Exception as e:
         print(f"❌ Async operation error: {e}")
         traceback.print_exc()
-        return False
+        assert False, f"Async operation error: {e}"
 
 def test_amem_integration():
     """Test A-MEM system integration."""
@@ -124,12 +126,12 @@ def test_amem_integration():
         from src.a_mem import MemorySystem, LLMController
         print("✅ A-MEM core components available")
         
-        return True
+        assert True  # A-MEM integration successful
         
     except Exception as e:
         print(f"❌ A-MEM integration error: {e}")
         traceback.print_exc()
-        return False
+        assert False, f"A-MEM integration error: {e}"
 
 def main():
     """Run all Phase 4 tests."""

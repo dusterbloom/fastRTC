@@ -280,6 +280,7 @@ class TestPerformanceBenchmarks:
         
         for i, audio in enumerate(conversation_samples):
             turn_start_time = time.time()
+            test_text = f"Test conversation turn {i+1}"
             response = await mock_voice_assistant.process_audio_turn(test_text)
             turn_end_time = time.time()
             

@@ -13,7 +13,7 @@ def test_critical_fixes():
         print("✅ 1. KokoroONNX class available")
     except ImportError as e:
         print(f"❌ 1. KokoroONNX class import failed: {e}")
-        return False
+        assert False, f"KokoroONNX class import failed: {e}"
     
     # Test 2: VoiceAssistant constructor accepts config parameter
     try:
@@ -22,17 +22,23 @@ def test_critical_fixes():
         print("✅ 2. VoiceAssistant accepts config parameter")
     except TypeError as e:
         print(f"❌ 2. VoiceAssistant config parameter failed: {e}")
-        return False
+        assert False, f"VoiceAssistant config parameter failed: {e}"
     
     # Test 3: Application factory functions available
     try:
         from src.core.main import create_application, create_voice_assistant, VoiceAssistantApplication
-        app = create_application()
+        import asyncio
+        
+        # Test async create_application
+        async def test_async_app():
+            return await create_application()
+        
+        app = asyncio.run(test_async_app())
         va = create_voice_assistant()
         print("✅ 3. Application factory functions available")
     except (ImportError, AttributeError) as e:
         print(f"❌ 3. Application factory functions failed: {e}")
-        return False
+        assert False, f"Application factory functions failed: {e}"
     
     print("\n🎉 ALL CRITICAL FIXES WORKING SUCCESSFULLY!")
     print("\nSummary of fixes:")
@@ -41,7 +47,8 @@ def test_critical_fixes():
     print("- Added missing create_voice_assistant application factory function")
     print("- Fixed performance tests to use text instead of audio data")
     
-    return True
+    # All tests passed
+    assert True
 
 if __name__ == "__main__":
     test_critical_fixes()

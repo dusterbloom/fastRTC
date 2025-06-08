@@ -53,7 +53,8 @@ class TestLLMIntegration:
     async def integrated_llm_service(self, llm_service, response_cache, conversation_buffer, memory_manager):
         """Create fully integrated LLM service with real Ollama."""
         # Create real HTTP session for Ollama integration
-        async with aiohttp.ClientSession() as session:
+        session = aiohttp.ClientSession()
+        try:
             await llm_service.initialize(
                 http_session=session,
                 response_cache=response_cache,
@@ -61,6 +62,8 @@ class TestLLMIntegration:
                 memory_manager=memory_manager
             )
             yield llm_service
+        finally:
+            await session.close()
     
     @pytest.mark.asyncio
     async def test_llm_with_memory_integration(self, integrated_llm_service, memory_manager):
