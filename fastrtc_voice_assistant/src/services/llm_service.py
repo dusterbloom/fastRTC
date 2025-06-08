@@ -90,7 +90,9 @@ class LLMService(LLMServiceInterface):
         self.conversation_buffer = conversation_buffer
         self.memory_manager = memory_manager
         
-        logger.info("LLM service dependencies initialized")
+        logger.info(f"🔧 LLM Debug: HTTP session initialized: {http_session is not None}")
+        logger.info(f"🔧 LLM Debug: Session type: {type(http_session)}")
+        logger.info("✅ LLM service dependencies initialized")
     
     def _get_llm_context_prompt(self, context: str) -> str:
         """Build LLM context prompt with memory and conversation history.

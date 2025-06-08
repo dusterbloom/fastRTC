@@ -46,19 +46,24 @@ class BluetoothAudioProcessor(BaseAudioProcessor):
         
         logger.info("🧠 Intelligent Audio Processor initialized")
     
-    def _process_audio(self, audio: AudioData) -> AudioData:
+    def _process_audio(self, audio) -> AudioData:
         """Process audio with intelligent healing and preprocessing.
         
         Args:
-            audio: Input audio data
+            audio: Input audio data (AudioData object or numpy array)
             
         Returns:
             AudioData: Processed audio data
         """
-        # Convert to the expected format for processing
-        sample_rate, audio_array = self._preprocess_bluetooth_audio(
-            (audio.sample_rate, audio.samples)
-        )
+        # Handle both AudioData objects and raw numpy arrays
+        if hasattr(audio, 'sample_rate') and hasattr(audio, 'samples'):
+            # AudioData object
+            sample_rate, audio_array = self._preprocess_bluetooth_audio(
+                (audio.sample_rate, audio.samples)
+            )
+        else:
+            # Raw numpy array - process directly
+            sample_rate, audio_array = self._preprocess_bluetooth_audio(audio)
         
         # Create processed AudioData
         duration = len(audio_array) / sample_rate if sample_rate > 0 else 0.0
@@ -204,17 +209,21 @@ class BluetoothAudioProcessor(BaseAudioProcessor):
         
         # 5. FIX: Frame continuity (smooth transitions between frames)
         if self.previous_frame is not None and len(self.previous_frame) > 0 and len(healed_audio) > 0:
-            # Check for sudden jumps between frames
-            frame_jump = abs(healed_audio[0] - self.previous_frame[-1])
-            if frame_jump > 0.5:  # Large discontinuity
-                # Smooth the transition
-                fade_length = min(10, len(healed_audio) // 4)
-                if fade_length > 0:
-                    fade_in = np.linspace(0, 1, fade_length)
-                    target_start = self.previous_frame[-1] * 0.8  # Gentle transition
-                    for i in range(fade_length):
-                        healed_audio[i] = healed_audio[i] * fade_in[i] + target_start * (1 - fade_in[i])
-                    healing_applied.append("frame_smoothing")
+            # Check for sudden jumps between frames - handle scalar comparison
+            try:
+                frame_jump = abs(float(healed_audio[0]) - float(self.previous_frame[-1]))
+                if frame_jump > 0.5:  # Large discontinuity
+                    # Smooth the transition
+                    fade_length = min(10, len(healed_audio) // 4)
+                    if fade_length > 0:
+                        fade_in = np.linspace(0, 1, fade_length)
+                        target_start = float(self.previous_frame[-1]) * 0.8  # Gentle transition
+                        for i in range(fade_length):
+                            healed_audio[i] = healed_audio[i] * fade_in[i] + target_start * (1 - fade_in[i])
+                        healing_applied.append("frame_smoothing")
+            except (ValueError, IndexError, TypeError):
+                # Skip frame smoothing if there are shape/type issues
+                pass
         
         # 6. FIX: Outlier removal (random spikes)
         if len(healed_audio) > 20:

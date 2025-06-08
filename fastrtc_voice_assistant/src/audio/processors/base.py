@@ -62,23 +62,34 @@ class BaseAudioProcessor(AudioProcessor):
         """
         pass
     
-    def _update_stats(self, audio: AudioData, processing_time: float) -> None:
+    def _update_stats(self, audio, processing_time: float) -> None:
         """Update processing statistics.
         
         Args:
-            audio: Processed audio data
+            audio: Processed audio data (AudioData object or numpy array)
             processing_time: Time taken for processing
         """
         self.stats['frames_processed'] += 1
-        self.stats['total_samples'] += len(audio.samples)
+        
+        # Handle both AudioData objects and raw numpy arrays
+        if hasattr(audio, 'samples'):
+            # AudioData object
+            sample_count = len(audio.samples)
+            duration = audio.duration
+        else:
+            # Raw numpy array
+            sample_count = len(audio)
+            duration = sample_count / 16000.0  # Assume 16kHz
+            
+        self.stats['total_samples'] += sample_count
         self.stats['processing_time'] += processing_time
         self.stats['last_processed'] = time.time()
         
         # Store processing history
         self.processing_history.append({
             'timestamp': time.time(),
-            'samples': len(audio.samples),
-            'duration': audio.duration,
+            'samples': sample_count,
+            'duration': duration,
             'processing_time': processing_time
         })
     

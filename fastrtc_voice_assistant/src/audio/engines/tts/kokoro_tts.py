@@ -13,19 +13,14 @@ from ....utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Import KokoroONNX at module level for testing compatibility
+# Import real fastRTC TTS model like V4
 try:
-    from kokoro_onnx import KokoroONNX
+    from fastrtc import get_tts_model, KokoroTTSOptions
+    USE_FASTRTC_TTS = True
 except ImportError:
-    from .kokoro_onnx_stub import KokoroONNX
-
-
-@dataclass
-class KokoroTTSOptions:
-    """Options for Kokoro TTS synthesis."""
-    speed: float = 1.0
-    lang: str = "en-us"
-    voice: Optional[str] = None
+    # Fallback to stub only if fastRTC is not available
+    from .kokoro_onnx_stub import KokoroONNX, KokoroTTSOptions
+    USE_FASTRTC_TTS = False
 
 
 class KokoroTTSEngine(BaseTTSEngine):
@@ -43,38 +38,38 @@ class KokoroTTSEngine(BaseTTSEngine):
         self._initialize_model()
     
     def _initialize_model(self) -> None:
-        """Initialize the Kokoro TTS model."""
+        """Initialize the Kokoro TTS model using fastRTC like V4."""
         try:
-            logger.info("🗣️ Loading TTS model (Kokoro)...")
+            logger.info("🗣️ Loading TTS model (Kokoro via fastRTC)...")
             
-            # Initialize Kokoro TTS using module-level import
-            self.tts_model = KokoroONNX()
-            
-            # Log which implementation is being used
-            if hasattr(self.tts_model, 'model') and hasattr(self.tts_model.model, 'voices'):
-                logger.info("✅ Using real Kokoro ONNX implementation")
-            else:
-                logger.info("⚠️ Using Kokoro ONNX stub implementation (for testing)")
-            
-            # Check available voices
-            try:
-                if hasattr(self.tts_model, 'model') and hasattr(self.tts_model.model, 'voices'):
-                    available_voices = getattr(self.tts_model.model, 'voices', [])
-                    if available_voices:
-                        logger.info(f"Kokoro TTS: Available voice names (first few): {list(available_voices)[:5]}")
+            if USE_FASTRTC_TTS:
+                # Use real fastRTC TTS model like V4
+                self.tts_model = get_tts_model("kokoro")
+                logger.info("✅ Using real fastRTC Kokoro TTS implementation")
+                
+                # Check available voices like V4
+                try:
+                    if hasattr(self.tts_model, 'model') and hasattr(self.tts_model.model, 'voices'):
+                        available_voices = getattr(self.tts_model.model, 'voices', [])
+                        if available_voices:
+                            logger.info(f"Kokoro TTS: Available voice names (first few): {list(available_voices)[:5]}")
+                        else:
+                            logger.info("Kokoro TTS: Could not list specific voice names from model.")
                     else:
-                        logger.warning("Kokoro TTS: No voices found in model")
-                else:
-                    logger.warning("Kokoro TTS: Could not access voice information")
-            except Exception as e:
-                logger.debug(f"Could not check voice information (likely mocked): {e}")
+                        logger.info("Kokoro TTS: Voice listing not directly available via tts_model.model.voices.")
+                except Exception as e:
+                    logger.debug(f"Could not check voice information: {e}")
+            else:
+                # Fallback to stub implementation
+                self.tts_model = KokoroONNX()
+                logger.warning("⚠️ Using Kokoro ONNX stub implementation (fastRTC not available)")
             
             logger.info("✅ Kokoro TTS model loaded successfully!")
             self._set_available(True)
             
         except ImportError as e:
             logger.error(f"❌ Kokoro TTS not available: {e}")
-            logger.error("Please install kokoro-onnx: pip install kokoro-onnx")
+            logger.error("Please install fastRTC or kokoro-onnx")
             self._set_available(False)
         except Exception as e:
             logger.error(f"❌ Failed to load Kokoro TTS model: {e}")

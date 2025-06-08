@@ -189,11 +189,12 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
         except Exception as e:
             logger.warning(f"Model warmup failed: {e}")
     
-    async def _transcribe_audio(self, audio: AudioData) -> TranscriptionResult:
-        """Transcribe audio using HuggingFace pipeline.
+    async def transcribe_with_sample_rate(self, audio_array: np.ndarray, sample_rate: int) -> TranscriptionResult:
+        """Transcribe audio with explicit sample rate handling.
         
         Args:
-            audio: Audio data to transcribe
+            audio_array: Audio data as numpy array
+            sample_rate: Sample rate of the audio
             
         Returns:
             TranscriptionResult: Transcription result with metadata
@@ -202,9 +203,144 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
             raise STTError("Pipeline not initialized")
         
         try:
-            # Convert AudioData to format expected by pipeline
-            audio_array = audio.samples
+            logger.info(f"🔧 STT Engine Debug: Input array shape={audio_array.shape}, dtype={audio_array.dtype}, SR={sample_rate}")
+            
+            # Ensure audio array is valid
+            if not isinstance(audio_array, np.ndarray):
+                audio_array = np.array(audio_array, dtype=self.np_dtype)
+            
+            # Convert to target dtype if needed
             if audio_array.dtype != self.np_dtype:
+                logger.info(f"🔧 STT Engine Debug: Converting dtype from {audio_array.dtype} to {self.np_dtype}")
+                audio_array = audio_array.astype(self.np_dtype)
+            
+            logger.info(f"🔧 STT Engine Debug: Audio range=[{np.min(audio_array):.6f}, {np.max(audio_array):.6f}], size={audio_array.size}")
+            
+            # Run transcription in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            outputs = await loop.run_in_executor(
+                None,
+                self._run_pipeline,
+                audio_array,
+                sample_rate
+            )
+            
+            # Extract transcription text
+            text = outputs.get("text", "").strip()
+            logger.info(f"📝 Transcribed: '{text}'")
+            
+            # Enhanced language detection using debug_audio_pipeline.py logic
+            language = None
+            confidence = None
+            chunks = None
+            
+            # Method 1: Try to get language from Whisper outputs (like debug_audio_pipeline.py)
+            if isinstance(outputs, dict):
+                # Direct language field
+                if 'language' in outputs:
+                    language = outputs['language']
+                    logger.info(f"🎤 Whisper detected language (direct): {language}")
+                
+                # From chunks if available
+                elif 'chunks' in outputs and outputs['chunks']:
+                    chunks = outputs['chunks']
+                    for chunk in chunks:
+                        if isinstance(chunk, dict) and 'language' in chunk:
+                            language = chunk['language']
+                            logger.info(f"🎤 Language from chunk: {language}")
+                            break
+                
+                # Get chunks for metadata
+                if 'chunks' in outputs:
+                    chunks = outputs['chunks']
+            
+            # Method 2: Enhanced text-based language detection (from debug_audio_pipeline.py)
+            if not language and text:
+                text_lower = text.lower()
+                
+                # Enhanced Italian detection
+                italian_words = [
+                    'ciao', 'come', 'stai', 'sono', 'mi', 'chiamo', 'voglio', 'parlare', 'italiano',
+                    'bene', 'grazie', 'prego', 'scusa', 'dove', 'quando', 'perché', 'cosa',
+                    'casa', 'famiglia', 'lavoro', 'tempo', 'oggi', 'ieri', 'domani',
+                    'mangiare', 'bere', 'dormire', 'andare', 'venire', 'fare', 'dire',
+                    'molto', 'poco', 'grande', 'piccolo', 'bello', 'brutto', 'buono', 'cattivo'
+                ]
+                
+                # Enhanced English detection
+                english_words = [
+                    'hello', 'how', 'are', 'you', 'my', 'name', 'is', 'want', 'speak', 'english',
+                    'good', 'bad', 'yes', 'no', 'please', 'thank', 'sorry', 'where', 'when', 'why', 'what',
+                    'home', 'family', 'work', 'time', 'today', 'yesterday', 'tomorrow',
+                    'eat', 'drink', 'sleep', 'go', 'come', 'do', 'say', 'make', 'get', 'take',
+                    'very', 'little', 'big', 'small', 'beautiful', 'ugly', 'good', 'bad'
+                ]
+                
+                # Count matches for each language
+                italian_matches = sum(1 for word in italian_words if word in text_lower)
+                english_matches = sum(1 for word in english_words if word in text_lower)
+                
+                # Determine language based on matches
+                if italian_matches > english_matches and italian_matches > 0:
+                    language = 'it'
+                    logger.info(f"🇮🇹 Language inferred from text (Italian words: {italian_matches}): {language}")
+                elif english_matches > 0:
+                    language = 'en'
+                    logger.info(f"🇺🇸 Language inferred from text (English words: {english_matches}): {language}")
+                else:
+                    # Fallback: check for common patterns
+                    if any(pattern in text_lower for pattern in ['mi chiamo', 'come stai', 'molto bene', 'va bene']):
+                        language = 'it'
+                        logger.info(f"🇮🇹 Language inferred from Italian patterns: {language}")
+                    elif any(pattern in text_lower for pattern in ['my name', 'how are', 'very good', 'i am']):
+                        language = 'en'
+                        logger.info(f"🇺🇸 Language inferred from English patterns: {language}")
+            
+            return TranscriptionResult(
+                text=text,
+                language=language,
+                confidence=confidence,
+                chunks=chunks
+            )
+            
+        except Exception as e:
+            raise STTError(f"Transcription failed: {e}") from e
+
+    async def _transcribe_audio(self, audio) -> TranscriptionResult:
+        """Transcribe audio using HuggingFace pipeline.
+        
+        Args:
+            audio: Audio data to transcribe (AudioData object or numpy array)
+            
+        Returns:
+            TranscriptionResult: Transcription result with metadata
+        """
+        if not self.pipeline:
+            raise STTError("Pipeline not initialized")
+        
+        try:
+            # SIMPLIFIED: Handle both AudioData objects and raw numpy arrays efficiently
+            logger.info(f"🔧 STT Engine Debug: Input type={type(audio)}")
+            
+            # Extract audio array from input
+            if hasattr(audio, 'samples'):
+                # AudioData object - extract samples
+                audio_array = audio.samples
+                logger.info(f"🔧 STT Engine Debug: AudioData object - samples shape={audio_array.shape}, dtype={audio_array.dtype}")
+            else:
+                # Raw numpy array - use directly
+                audio_array = audio
+                logger.info(f"🔧 STT Engine Debug: Raw array - shape={audio_array.shape}, dtype={audio_array.dtype}")
+            
+            # Ensure audio array is valid
+            if not isinstance(audio_array, np.ndarray):
+                audio_array = np.array(audio_array, dtype=self.np_dtype)
+            
+            logger.info(f"🔧 STT Engine Debug: Audio range=[{np.min(audio_array):.6f}, {np.max(audio_array):.6f}], size={audio_array.size}")
+            
+            # Convert to target dtype if needed
+            if audio_array.dtype != self.np_dtype:
+                logger.info(f"🔧 STT Engine Debug: Converting dtype from {audio_array.dtype} to {self.np_dtype}")
                 audio_array = audio_array.astype(self.np_dtype)
             
             # Run transcription in thread pool to avoid blocking
@@ -212,33 +348,80 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
             outputs = await loop.run_in_executor(
                 None,
                 self._run_pipeline,
-                audio_array
+                audio_array,
+                16000  # Default to 16kHz, will be overridden by gradio2.py
             )
             
             # Extract transcription text
             text = outputs.get("text", "").strip()
             logger.info(f"📝 Transcribed: '{text}'")
             
-            # Extract language information if available
+            # Enhanced language detection using debug_audio_pipeline.py logic
             language = None
             confidence = None
             chunks = None
             
-            # Try to get language from outputs
-            if hasattr(outputs, 'get'):
+            # Method 1: Try to get language from Whisper outputs (like debug_audio_pipeline.py)
+            if isinstance(outputs, dict):
+                # Direct language field
                 if 'language' in outputs:
                     language = outputs['language']
-                    logger.info(f"🎤 Whisper detected language: {language}")
-                elif 'chunks' in outputs and outputs['chunks']:
-                    # Try to get language from first chunk
-                    first_chunk = outputs['chunks'][0]
-                    if isinstance(first_chunk, dict) and 'language' in first_chunk:
-                        language = first_chunk['language']
-                        logger.info(f"🎤 Language from chunk: {language}")
+                    logger.info(f"🎤 Whisper detected language (direct): {language}")
                 
-                # Get chunks if available
+                # From chunks if available
+                elif 'chunks' in outputs and outputs['chunks']:
+                    chunks = outputs['chunks']
+                    for chunk in chunks:
+                        if isinstance(chunk, dict) and 'language' in chunk:
+                            language = chunk['language']
+                            logger.info(f"🎤 Language from chunk: {language}")
+                            break
+                
+                # Get chunks for metadata
                 if 'chunks' in outputs:
                     chunks = outputs['chunks']
+            
+            # Method 2: Enhanced text-based language detection (from debug_audio_pipeline.py)
+            if not language and text:
+                text_lower = text.lower()
+                
+                # Enhanced Italian detection
+                italian_words = [
+                    'ciao', 'come', 'stai', 'sono', 'mi', 'chiamo', 'voglio', 'parlare', 'italiano',
+                    'bene', 'grazie', 'prego', 'scusa', 'dove', 'quando', 'perché', 'cosa',
+                    'casa', 'famiglia', 'lavoro', 'tempo', 'oggi', 'ieri', 'domani',
+                    'mangiare', 'bere', 'dormire', 'andare', 'venire', 'fare', 'dire',
+                    'molto', 'poco', 'grande', 'piccolo', 'bello', 'brutto', 'buono', 'cattivo'
+                ]
+                
+                # Enhanced English detection
+                english_words = [
+                    'hello', 'how', 'are', 'you', 'my', 'name', 'is', 'want', 'speak', 'english',
+                    'good', 'bad', 'yes', 'no', 'please', 'thank', 'sorry', 'where', 'when', 'why', 'what',
+                    'home', 'family', 'work', 'time', 'today', 'yesterday', 'tomorrow',
+                    'eat', 'drink', 'sleep', 'go', 'come', 'do', 'say', 'make', 'get', 'take',
+                    'very', 'little', 'big', 'small', 'beautiful', 'ugly', 'good', 'bad'
+                ]
+                
+                # Count matches for each language
+                italian_matches = sum(1 for word in italian_words if word in text_lower)
+                english_matches = sum(1 for word in english_words if word in text_lower)
+                
+                # Determine language based on matches
+                if italian_matches > english_matches and italian_matches > 0:
+                    language = 'it'
+                    logger.info(f"🇮🇹 Language inferred from text (Italian words: {italian_matches}): {language}")
+                elif english_matches > 0:
+                    language = 'en'
+                    logger.info(f"🇺🇸 Language inferred from text (English words: {english_matches}): {language}")
+                else:
+                    # Fallback: check for common patterns
+                    if any(pattern in text_lower for pattern in ['mi chiamo', 'come stai', 'molto bene', 'va bene']):
+                        language = 'it'
+                        logger.info(f"🇮🇹 Language inferred from Italian patterns: {language}")
+                    elif any(pattern in text_lower for pattern in ['my name', 'how are', 'very good', 'i am']):
+                        language = 'en'
+                        logger.info(f"🇺🇸 Language inferred from English patterns: {language}")
             
             return TranscriptionResult(
                 text=text,
@@ -250,21 +433,42 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
         except Exception as e:
             raise STTError(f"Transcription failed: {e}") from e
     
-    def _run_pipeline(self, audio_array: np.ndarray) -> Dict[str, Any]:
-        """Run the pipeline synchronously.
+    def _run_pipeline(self, audio_array: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
+        """Run the pipeline synchronously with proper sample rate handling.
         
         Args:
             audio_array: Audio data as numpy array
+            sample_rate: Sample rate of input audio
             
         Returns:
             Dict[str, Any]: Pipeline outputs
         """
+        # CRITICAL FIX: Handle sample rate conversion
+        if sample_rate != 16000:
+            logger.info(f"🔧 STT Debug: Resampling from {sample_rate}Hz to 16000Hz")
+            # Simple downsampling for 48kHz -> 16kHz (3:1 ratio)
+            if sample_rate == 48000:
+                audio_array = audio_array[::3]  # Take every 3rd sample
+                logger.info(f"🔧 STT Debug: Downsampled to {audio_array.size} samples")
+            else:
+                # For other sample rates, use simple decimation
+                ratio = sample_rate // 16000
+                if ratio > 1:
+                    audio_array = audio_array[::ratio]
+        
+        # SIMPLIFIED: Use audio array directly (no audio_to_bytes needed)
+        logger.info(f"🔧 STT Debug: Using direct audio array for Whisper")
+        
+        # CRITICAL FIX: Use exact same pipeline call as V4 but with optimizations
         return self.pipeline(
             audio_array,
             chunk_length_s=30,
             batch_size=1,
-            generate_kwargs={'task': 'transcribe'},
-            return_timestamps=False,
+            generate_kwargs={
+                'task': 'transcribe',
+                'language': None,  # Let Whisper auto-detect
+            },
+            return_timestamps=False,  # KEY FIX: Match V4 exactly
         )
     
     def get_model_info(self) -> Dict[str, Any]:

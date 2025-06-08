@@ -7,10 +7,13 @@ Integrates all components from previous phases using dependency injection.
 
 import os
 import hashlib
+
+import numpy as np
 import aiohttp
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
+from .interfaces import AudioData
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance
 
@@ -25,7 +28,7 @@ from ..config.settings import (
     OLLAMA_URL, LM_STUDIO_MODEL, LM_STUDIO_URL, AMEM_LLM_MODEL, AMEM_EMBEDDER_MODEL,
     HF_MODEL_ID
 )
-from ..config.language_config import LANGUAGE_NAMES
+from ..config.language_config import LANGUAGE_NAMES, WHISPER_TO_KOKORO_LANG
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -159,6 +162,16 @@ class VoiceAssistant:
         self.http_session = aiohttp.ClientSession(connector=connector, timeout=timeout)
         logger.info("✅ aiohttp ClientSession created.")
         
+        # CRITICAL FIX: Initialize LLM service with HTTP session
+        logger.info("🔧 Initializing LLM service with HTTP session...")
+        await self.llm_service.initialize(
+            http_session=self.http_session,
+            response_cache=self.response_cache,
+            conversation_buffer=self.conversation_buffer,
+            memory_manager=self.memory_manager
+        )
+        logger.info("✅ LLM service initialized with HTTP session.")
+        
         # Initialize memory manager async components
         await self.memory_manager.start_background_processor()
         logger.info("✅ Memory manager background processor started.")
@@ -198,7 +211,37 @@ class VoiceAssistant:
         Returns:
             Processed audio tuple (sample_rate, audio_array)
         """
-        return self.audio_processor.preprocess_bluetooth_audio(audio_data)
+        # Convert audio_data to AudioData format for processing
+        if isinstance(audio_data, tuple) and len(audio_data) == 2:
+            sample_rate, audio_array = audio_data
+            
+            # Ensure audio is single channel (convert from multi-channel if needed)
+            if isinstance(audio_array, np.ndarray) and len(audio_array.shape) > 1:
+                if audio_array.shape[1] > 1:  # Multi-channel
+                    audio_array = np.mean(audio_array, axis=1)  # Convert to mono
+                elif audio_array.shape[0] > 1 and audio_array.shape[1] == 1:  # Single column
+                    audio_array = audio_array.flatten()
+            
+            # Ensure float32 type
+            if isinstance(audio_array, np.ndarray):
+                audio_array = audio_array.astype(np.float32)
+            
+            audio_data_obj = AudioData(
+                samples=audio_array,
+                sample_rate=sample_rate,
+                duration=len(audio_array) / sample_rate if sample_rate > 0 else 0.0
+            )
+        else:
+            # Handle other formats if needed
+            audio_data_obj = AudioData(
+                samples=np.array([], dtype=np.float32),
+                sample_rate=16000,
+                duration=0.0
+            )
+        
+        # Process through the audio processor
+        processed_audio = self.audio_processor.process(audio_data_obj)
+        return processed_audio.sample_rate, processed_audio.samples
     
     async def process_audio_turn(self, user_text: str) -> str:
         """
@@ -217,12 +260,13 @@ class VoiceAssistant:
             return cached_response
         
         # Generate new response using LLM service
-        response = await self.llm_service.generate_response(
-            user_text,
-            conversation_history=self.conversation_buffer.get_turns(),
-            user_id=self.user_id,
-            session_id=self.session_id
-        )
+        # Build context from conversation history
+        context = ""
+        turns = self.conversation_buffer.get_turns()
+        if turns:
+            context = "\n".join([f"User: {turn[0]}\nAssistant: {turn[1]}" for turn in turns[-3:]])
+        
+        response = await self.llm_service.get_response(user_text, context)
         
         # Update memory and cache
         await self.memory_manager.add_to_memory_smart(user_text, response)
@@ -250,11 +294,31 @@ class VoiceAssistant:
             text: Input text to analyze
             
         Returns:
-            Detected language code
+            Detected language code (Kokoro format)
         """
         language, confidence = self.language_detector.detect_language(text)
         logger.debug(f"Language detection: {language} (confidence: {confidence:.3f})")
-        return language
+        
+        # Convert to Kokoro language code if needed
+        kokoro_language = self.convert_to_kokoro_language(language)
+        if kokoro_language != language:
+            logger.debug(f"Language mapping: {language} → {kokoro_language}")
+        
+        return kokoro_language
+    
+    def convert_to_kokoro_language(self, language_code: str) -> str:
+        """
+        Convert standard language codes to Kokoro language codes.
+        
+        Args:
+            language_code: Standard language code (e.g., 'en', 'it', 'es')
+            
+        Returns:
+            Kokoro language code (e.g., 'a', 'i', 'e')
+        """
+        # Use the mapping from language_config
+        kokoro_code = WHISPER_TO_KOKORO_LANG.get(language_code, DEFAULT_LANGUAGE)
+        return kokoro_code
     
     def get_voices_for_language(self, language_code: str) -> List[str]:
         """
@@ -267,6 +331,30 @@ class VoiceAssistant:
             List of available voice IDs
         """
         return self.voice_mapper.get_voices_for_language(language_code)
+    
+    def stream_tts_synthesis(self, text: str, voice: str, language: str):
+        """
+        Stream TTS synthesis results for FastRTC integration.
+        
+        Args:
+            text: Text to synthesize
+            voice: Voice identifier
+            language: Language code (Kokoro format)
+            
+        Yields:
+            Tuple[int, np.ndarray]: (sample_rate, audio_chunk)
+        """
+        if not self.tts_engine.is_available():
+            logger.error("TTS engine is not available for streaming")
+            return
+        
+        try:
+            # Use the TTS engine's streaming method
+            for sample_rate, audio_chunk in self.tts_engine.stream_synthesis(text, voice, language):
+                yield sample_rate, audio_chunk
+        except Exception as e:
+            logger.error(f"TTS streaming failed: {e}")
+            raise
     
     def get_cached_response(self, text: str) -> Optional[str]:
         """

@@ -26,11 +26,11 @@ class BaseSTTEngine(STTEngine):
         }
         self._is_available = False
     
-    async def transcribe(self, audio: AudioData) -> TranscriptionResult:
+    async def transcribe(self, audio) -> TranscriptionResult:
         """Transcribe audio to text with timing and error handling.
         
         Args:
-            audio: Audio data to transcribe
+            audio: Audio data to transcribe (AudioData object or numpy array)
             
         Returns:
             TranscriptionResult: Transcription with metadata
@@ -59,28 +59,37 @@ class BaseSTTEngine(STTEngine):
             raise STTError(f"Transcription failed: {e}") from e
     
     @abstractmethod
-    async def _transcribe_audio(self, audio: AudioData) -> TranscriptionResult:
+    async def _transcribe_audio(self, audio) -> TranscriptionResult:
         """Implement specific transcription logic.
         
         Args:
-            audio: Audio data to transcribe
+            audio: Audio data to transcribe (AudioData object or numpy array)
             
         Returns:
             TranscriptionResult: Transcription result
         """
         pass
     
-    def _update_stats(self, audio: AudioData, processing_time: float, success: bool) -> None:
+    def _update_stats(self, audio, processing_time: float, success: bool) -> None:
         """Update transcription statistics.
         
         Args:
-            audio: Transcribed audio data
+            audio: Transcribed audio data (AudioData object or numpy array)
             processing_time: Time taken for transcription
             success: Whether transcription was successful
         """
         if success:
             self.stats['transcriptions'] += 1
-            self.stats['total_audio_duration'] += audio.duration
+            
+            # Handle both AudioData objects and raw numpy arrays
+            if hasattr(audio, 'duration'):
+                # AudioData object
+                duration = audio.duration
+            else:
+                # Raw numpy array - estimate duration assuming 16kHz
+                duration = len(audio) / 16000.0 if len(audio) > 0 else 0.0
+                
+            self.stats['total_audio_duration'] += duration
             self.stats['last_transcription'] = time.time()
         else:
             self.stats['errors'] += 1
