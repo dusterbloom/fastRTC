@@ -449,6 +449,46 @@ class AMemMemoryManager(MemoryManager):
         
         return category
     
+    async def add_to_memory_smart(self, user_text: str, assistant_text: str) -> Optional[str]:
+        """Add a conversation turn to memory with smart evolution tracking.
+        
+        This method is an alias for add_memory but also tracks memory evolution
+        for the A-MEM system. It triggers memory consolidation when the evolution
+        threshold is reached.
+        
+        Args:
+            user_text: User's input text
+            assistant_text: Assistant's response text
+            
+        Returns:
+            Optional[str]: Memory category if successful, None otherwise
+        """
+        # Call the existing add_memory method
+        category = await self.add_memory(user_text, assistant_text)
+        
+        # Track memory evolution if memory was stored
+        if category:
+            # Increment evolution counter
+            if hasattr(self.amem_system, 'evo_cnt'):
+                self.amem_system.evo_cnt += 1
+            else:
+                self.amem_system.evo_cnt = 1
+            
+            # Check if we should trigger memory evolution/consolidation
+            evolution_threshold = getattr(self, 'evo_threshold', 50)
+            if self.amem_system.evo_cnt >= evolution_threshold:
+                try:
+                    # Trigger memory consolidation
+                    logger.info(f"🧠 Triggering A-MEM memory evolution at {self.amem_system.evo_cnt} operations")
+                    if hasattr(self.amem_system, 'consolidate_memories'):
+                        self.amem_system.consolidate_memories()
+                    # Reset evolution counter after consolidation
+                    self.amem_system.evo_cnt = 0
+                except Exception as e:
+                    logger.error(f"❌ Memory evolution failed: {e}")
+        
+        return category
+    
     def _store_memory_background(self, user_text: str, assistant_text: str, category: str):
         """Store memory in background thread.
         

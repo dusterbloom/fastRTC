@@ -86,6 +86,7 @@ class TestFullSystemIntegration:
         mock_memory = AsyncMock()
         mock_memory.get_user_context.return_value = "User prefers casual conversation."
         mock_memory.add_memory.return_value = "memory_id_123"
+        mock_memory.add_to_memory_smart.return_value = "memory_id_123"
         mock_memory.search_memories.return_value = "Previous conversation about weather."
         
         # Mock LLM Service
@@ -221,7 +222,7 @@ class TestFullSystemIntegration:
                 return f"evolved_memory_{len(evolution_calls)}"
             return f"memory_{len(evolution_calls)}"
         
-        mock_system_components["memory"].add_memory.side_effect = mock_add_memory_with_evolution
+        mock_system_components["memory"].add_to_memory_smart.side_effect = mock_add_memory_with_evolution
         
         # Process conversation turns
         for i, topic in enumerate(conversation_topics):

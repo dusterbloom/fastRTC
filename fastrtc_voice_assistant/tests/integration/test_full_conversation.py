@@ -243,7 +243,6 @@ class TestFullConversationFlow:
         
         # Process 5 turns to trigger statistics display
         for i in range(5):
-            mock_voice_assistant.turn_count = i + 1
             list(callback_handler.process_audio_stream(audio_tuple))
         
         # Verify statistics were collected
@@ -417,11 +416,12 @@ class TestVoiceAssistantApplicationIntegration:
             mock_exit.assert_called_once_with(0)
     
     @patch('src.core.main.setup_logging')
-    def test_create_application_factory(self, mock_setup_logging):
+    @pytest.mark.asyncio
+    async def test_create_application_factory(self, mock_setup_logging):
         """Test application factory function."""
         from src.core.main import create_application
         
-        app = create_application()
+        app = await create_application()
         
         # Verify logging was set up
         mock_setup_logging.assert_called_once()
