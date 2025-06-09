@@ -3,4 +3,4 @@ venv/
 __pycache__/
 .github/
 htmlcov/
-chroma_db/
+chroma_db/*

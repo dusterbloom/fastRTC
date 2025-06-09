@@ -2,3 +2,4 @@ env/
 archive/
 __pycache__/
 .vscode/
+qdrant_storage/

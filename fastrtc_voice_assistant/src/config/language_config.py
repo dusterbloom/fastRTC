@@ -39,7 +39,7 @@ KOKORO_TTS_LANG_MAP: Dict[str, str] = {
     'a': 'en-us',  # American English
     'b': 'en-gb',  # British English
     'i': 'it',     # Italian
-    'e': 'es-es',  # Spanish
+    'e': 'es',     # Spanish
     'f': 'fr-fr',  # French
     'p': 'pt-br',  # Brazilian Portuguese
     'j': 'ja-jp',  # Japanese

@@ -410,7 +410,7 @@ class TestKokoroTTSEngine:
     @patch('src.audio.engines.tts.kokoro_tts.KokoroONNX')
     @pytest.mark.parametrize("language,expected_lang", [
         ("i", "it"),     # Italian
-        ("e", "es-es"),  # Spanish
+        ("e", "es"),  # Spanish
         ("f", "fr-fr"),  # French
         ("a", "en-us"),  # American English
         ("unknown", "en-us")  # Fallback
