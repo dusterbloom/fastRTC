@@ -31,7 +31,7 @@ class MemoryConfig:
         default_factory=lambda: os.getenv("AMEM_LLM_MODEL", "llama3.2:3b")
     )
     embedder_model: str = field(
-        default_factory=lambda: os.getenv("AMEM_EMBEDDER_MODEL", "nomic-embed-text")
+        default_factory=lambda: os.getenv("AMEM_EMBEDDER_MODEL", "all-MiniLM-L6-v2")
     )
     evolution_threshold: int = 50
     cache_ttl_seconds: int = 180
@@ -116,6 +116,6 @@ OLLAMA_URL = "http://localhost:11434"
 LM_STUDIO_MODEL = "mistral-nemo-instruct-2407"
 LM_STUDIO_URL = "http://192.168.1.5:1234/v1"
 AMEM_LLM_MODEL = "llama3.2:3b"
-AMEM_EMBEDDER_MODEL = "nomic-embed-text"
+AMEM_EMBEDDER_MODEL = "all-MiniLM-L6-v2"
 HF_MODEL_ID = "openai/whisper-large-v3"
 DEFAULT_SPEECH_THRESHOLD = 0.15

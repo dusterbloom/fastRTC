@@ -254,23 +254,55 @@ class VoiceAssistant:
             Generated assistant response
         """
         # Check cache first
-        cached_response = self.get_cached_response(user_text)
+        cached_response = self.get_cached_response(user_text) # In VoiceAssistant
         if cached_response:
             logger.info("📋 Using cached response")
             return cached_response
         
         # Generate new response using LLM service
-        # Build context from conversation history
-        context = ""
-        turns = self.conversation_buffer.get_turns()
-        if turns:
-            context = "\n".join([f"User: {turn[0]}\nAssistant: {turn[1]}" for turn in turns[-3:]])
         
-        response = await self.llm_service.get_response(user_text, context)
+        # === MODIFICATION START ===
+        # Build context from BOTH A-MEM long-term memory AND current session history
+        
+        # 1. Get long-term context from A-MEM
+        amem_context = ""
+        if self.memory_manager: # Ensure memory_manager is initialized
+            amem_context = self.memory_manager.get_user_context() # This should return "The user's name is Peppy..."
+            logger.debug(f"A-MEM Context for LLM: {amem_context}")
+
+        # 2. Get short-term context from current conversation buffer
+        session_context = ""
+        turns = self.conversation_buffer.get_turns() # Gets turns from *current session* buffer
+        if turns:
+            session_turns_text = "\n".join([f"User: {turn.user}\nAssistant: {turn.assistant}" for turn in turns[-3:]]) # Assuming turn is ConversationTurn object
+            if session_turns_text:
+                session_context = f"\n\nRecent exchanges in this session:\n{session_turns_text}"
+            logger.debug(f"Session Context for LLM: {session_context}")
+
+        # Combine contexts (A-MEM context should ideally be part of the system prompt in LLMService,
+        # but for now, let's pass it as part of the general context.
+        # Or, better, LLMService should be responsible for fetching and combining these if needed)
+        # For this immediate fix, let's ensure amem_context is passed to LLMService
+        
+        # The `context` variable passed to `llm_service.get_response` in the original code
+        # was only derived from the current session's conversation_buffer.
+        # We need to ensure the `amem_context` (which contains "Peppy") is used.
+        # The LLMService._get_llm_context_prompt ALREADY takes a `context` argument
+        # which is intended for this A-MEM info.
+        
+        # So, the main `context` variable passed to `llm_service.get_response` should be `amem_context`.
+        # The `LLMService._get_llm_context_prompt` will then append its own `recent_conv` (session buffer).
+        
+        final_context_for_llm_service = amem_context
+        # === MODIFICATION END ===
+        
+        # Calls the LLMService instance's get_response
+        # Pass the A-MEM derived context here.
+        response = await self.llm_service.get_response(user_text, final_context_for_llm_service)
         
         # Update memory and cache
-        await self.memory_manager.add_to_memory_smart(user_text, response)
-        self.cache_response(user_text, response)
+        await self.memory_manager.add_to_memory_smart(user_text, response) # AMemMemoryManager
+        self.cache_response(user_text, response) # VoiceAssistant's cache
         
         return response
     

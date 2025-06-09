@@ -18,6 +18,7 @@ import pickle
 from pathlib import Path
 from litellm import completion
 import time
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +93,9 @@ class AgenticMemorySystem:
     
     def __init__(self, 
                  model_name: str = 'all-MiniLM-L6-v2',
-                 llm_backend: str = "openai",
-                 llm_model: str = "gpt-4o-mini",
-                 evo_threshold: int = 100,
+                 llm_backend: str = "ollama",
+                 llm_model: str = "llama3.2:3b",
+                 evo_threshold: int = 10,
                  api_key: Optional[str] = None):  
         """Initialize the memory system.
         
@@ -126,36 +127,40 @@ class AgenticMemorySystem:
         # Evolution system prompt
         self._evolution_system_prompt = '''
                                 You are an AI memory evolution agent responsible for managing and evolving a knowledge base.
-                                Analyze the the new memory note according to keywords and context, also with their several nearest neighbors memory.
+                                Analyze the new memory note according to keywords and context, also with their several nearest neighbors memory.
                                 Make decisions about its evolution.  
 
                                 IMPORTANT: When analyzing conversation content, remember that:
                                 - User messages start with "User:"
                                 - Assistant messages start with "Assistant:"
-                                - ONLY extract personal information (like names) from User messages
+                                - You can extract any personal information, preferences and more from User messages
                                 - Assistant messages should NOT be used to extract user information
 
-                                The new memory context:
-                                {context}
+                                The new memory context: {context}
                                 content: {content}
                                 keywords: {keywords}
 
-                                The nearest neighbors memories:
-                                {nearest_neighbors_memories}
+                                The nearest neighbors memories: {nearest_neighbors_memories}
+
+                             
 
                                 Based on this information, determine:
                                 1. Should this memory be evolved? Consider its relationships with other memories.
                                 2. What specific actions should be taken (strengthen, update_neighbor)?
                                    2.1 If choose to strengthen the connection, which memory should it be connected to? Can you give the updated tags of this memory?
                                    2.2 If choose to update_neighbor, you can update the context and tags of these memories based on the understanding of these memories. If the context and the tags are not updated, the new context and tags should be the same as the original ones. Generate the new context and tags in the sequential order of the input neighbors.
+                                
+                                
                                 Tags should be determined by the content of these characteristic of these memories, which can be used to retrieve them later and categorize them.
                                 Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
+                                For 'suggested_connections', provide a list of direct, clean UUID strings of the neighbor memories you want to connect to. Do NOT include extra quotes or any other formatting around the UUIDs. If no connections are suggested, provide an empty list [].
+
                                 The number of neighbors is {neighbor_number}.
                                 Return your decision in JSON format with the following structure:
                                 {{
                                     "should_evolve": True or False,
                                     "actions": ["strengthen", "update_neighbor"],
-                                    "suggested_connections": ["neighbor_memory_ids"],
+                                    "suggested_connections": ["neighbor_memory_ids"], 
                                     "tags_to_update": ["tag_1",..."tag_n"], 
                                     "new_context_neighborhood": ["new context",...,"new context"],
                                     "new_tags_neighborhood": [["tag_1",...,"tag_n"],...["tag_1",...,"tag_n"]],
@@ -404,24 +409,78 @@ class AgenticMemorySystem:
             logger.error(f"Error loading memories from ChromaDB: {e}", exc_info=True)
 
 
-    def _parse_llm_connection_indices(self, llm_connection_refs: List[str], max_index: int) -> List[int]:
-        """Helper to parse LLM's connection references (e.g., "0", "/memory/1") into valid integer indices."""
+    def _parse_llm_connection_indices(self, llm_connection_refs: List[str], neighbor_ids: List[str], max_index: int) -> List[int]:
+        """Helper to parse LLM's connection references into valid integer indices.
+        Handles direct indices, "memory index:X" format, and raw IDs.
+        """
         parsed_indices = set() # Use a set to avoid duplicate indices
+        
+        if not llm_connection_refs:
+            return []
+
         for ref in llm_connection_refs:
-            if not isinstance(ref, str):
-                logger.warning(f"LLM connection reference is not a string: {ref}. Skipping.")
+            if not isinstance(ref, str) or not ref.strip():
+                logger.debug(f"LLM connection reference is not a valid string or is empty: '{ref}'. Skipping.")
                 continue
             
-            # Attempt to extract number, removing common prefixes/suffixes
-            cleaned_ref = ref.replace("/memory/", "").strip()
+            cleaned_ref = ref.strip()
+            parsed_successfully = False
+
+            # Attempt 1: Direct integer conversion
             try:
                 idx = int(cleaned_ref)
                 if 0 <= idx < max_index:
                     parsed_indices.add(idx)
+                    parsed_successfully = True
+                    logger.debug(f"Parsed LLM connection reference '{ref}' as direct index: {idx}")
                 else:
-                    logger.warning(f"LLM suggested connection index {idx} is out of bounds (max: {max_index-1}). Skipping.")
+                    logger.warning(f"LLM suggested direct index {idx} is out of bounds (max: {max_index-1}). Skipping '{ref}'.")
             except ValueError:
-                logger.warning(f"Could not parse LLM connection reference '{ref}' to an integer index. Skipping.")
+                pass # Continue to next attempt if not a direct integer
+
+            if parsed_successfully:
+                continue
+
+            # Attempt 2: Regex for "memory index:X" format (case-insensitive)
+            # Attempt 2: Regex for "memory index:X" or "memory index X" format (case-insensitive)
+            if not parsed_successfully:
+                # Regex specifically for "memory index <number>"
+                match_space = re.search(r"memory\s+index\s+(\d+)", cleaned_ref, re.IGNORECASE)
+                # Regex specifically for "memory index:<number>"
+                match_colon = re.search(r"memory\s+index:\s*(\d+)", cleaned_ref, re.IGNORECASE)
+                
+                final_match = match_space or match_colon
+
+                if final_match:
+                    try:
+                        idx = int(final_match.group(1)) # Group 1 will be the digits
+                        if 0 <= idx < max_index:
+                            parsed_indices.add(idx)
+                            parsed_successfully = True
+                            logger.debug(f"Parsed LLM connection reference '{ref}' using regex as index: {idx}")
+                        else:
+                            logger.warning(f"LLM suggested regex index {idx} from '{ref}' is out of bounds (max: {max_index-1}). Skipping.")
+                    except ValueError:
+                        logger.warning(f"Could not parse regex-extracted index from '{ref}'. Skipping.")     
+
+            if parsed_successfully:
+                continue
+
+            # Attempt 3: Match against `neighbor_ids` if the reference is an ID itself
+            if not parsed_successfully and cleaned_ref in neighbor_ids:
+                try:
+                    idx = neighbor_ids.index(cleaned_ref)
+                    # idx is guaranteed to be < max_index if found
+                    parsed_indices.add(idx)
+                    parsed_successfully = True
+                    logger.debug(f"Parsed LLM connection reference '{ref}' as direct ID match, index: {idx}")
+                except ValueError:
+                    # This case should ideally not be reached if `cleaned_ref in neighbor_ids` is true
+                    logger.warning(f"Reference '{cleaned_ref}' was in neighbor_ids but index() failed. This is unexpected. Skipping.")
+
+            if not parsed_successfully:
+                logger.warning(f"Could not parse LLM connection reference '{ref}' to a valid index or ID. Skipping.")
+                
         return sorted(list(parsed_indices))
 
     def read(self, memory_id: str) -> Optional[MemoryNote]:
@@ -705,7 +764,7 @@ class AgenticMemorySystem:
                             "properties": {
                                 "should_evolve": {"type": "boolean"},
                                 "actions": {"type": "array", "items": {"type": "string"}},
-                                "suggested_connections": {"type": "array", "items": {"type": "string"}}, # LLM might return indices as strings
+                                "suggested_connections": {"type": "array", "items": {"type": "string"}},
                                 "new_context_neighborhood": {"type": "array", "items": {"type": "string"}},
                                 "tags_to_update": {"type": "array", "items": {"type": "string"}},
                                 "new_tags_neighborhood": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
@@ -728,7 +787,7 @@ class AgenticMemorySystem:
                     for action in actions:
                         if action == "strengthen":
                             llm_connection_refs = response_json.get("suggested_connections", [])
-                            llm_suggested_indices = self._parse_llm_connection_indices(llm_connection_refs, len(neighbor_ids))
+                            llm_suggested_indices = self._parse_llm_connection_indices(llm_connection_refs, neighbor_ids, len(neighbor_ids))
                             
                             actual_ids_to_link = [neighbor_ids[idx] for idx in llm_suggested_indices]
                             

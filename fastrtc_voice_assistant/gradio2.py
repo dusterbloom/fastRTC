@@ -58,7 +58,7 @@ LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "mistral-nemo-instruct-2407")
 
 # A-MEM settings
 AMEM_LLM_MODEL = os.getenv("AMEM_LLM_MODEL", "llama3.2:3b")
-AMEM_EMBEDDER_MODEL = os.getenv("AMEM_EMBEDDER_MODEL", "nomic-embed-text")
+AMEM_EMBEDDER_MODEL = os.getenv("AMEM_EMBEDDER_MODEL", "all-MiniLM-L6-v2")
 
 KOKORO_PREFERRED_VOICE = "af_heart"
 KOKORO_FALLBACK_VOICE_1 = "af_alloy"
