@@ -230,6 +230,16 @@ class LLMService(LLMServiceInterface):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text}
         ]
+
+        if "remember" in user_text.lower() or "talked about" in user_text.lower():
+                detailed_memories = await self.memory_manager.search_memories(user_text) # This gets formatted search results
+                if detailed_memories and "don't have specific memories" not in detailed_memories:
+                    system_prompt += f"\n\nBased on your query, here's some potentially relevant information from my memory:\n{detailed_memories}"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text}
+        ]
         
         try:
             if self.use_ollama:

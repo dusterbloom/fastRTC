@@ -19,6 +19,7 @@ from pathlib import Path
 from litellm import completion
 import time
 import re
+import html
 
 logger = logging.getLogger(__name__)
 
@@ -127,43 +128,87 @@ class AgenticMemorySystem:
         # Evolution system prompt
         self._evolution_system_prompt = '''
                                 You are an AI memory evolution agent responsible for managing and evolving a knowledge base.
-                                Analyze the new memory note according to keywords and context, also with their several nearest neighbors memory.
-                                Make decisions about its evolution.  
+                                Your primary goal is to make memories more findable and useful for a conversational AI.
+                                Analyze the "New Memory Note" provided below. This note consists of a user's statement and the AI assistant's response.
+                                Also consider its "Nearest Neighbors Memories" (if any) for context and potential links.
 
-                                IMPORTANT: When analyzing conversation content, remember that:
-                                - User messages start with "User:"
-                                - Assistant messages start with "Assistant:"
-                                - You can extract any personal information, preferences and more from User messages
-                                - Assistant messages should NOT be used to extract user information
+                                IMPORTANT GUIDELINES:
+                                - Focus on information **about the USER** (preferences, facts, stated interests) when extracting personal insights.
+                                - User messages start with "User:". Assistant messages start with "Assistant:".
+                                - Extract personal information, preferences, and facts primarily from **User messages**.
+                                - Assistant messages might provide conversational context or general knowledge, but are less likely to contain new information *about the user*.
 
-                                The new memory context: {context}
-                                content: {content}
-                                keywords: {keywords}
+                                PROVIDED INFORMATION:
 
-                                The nearest neighbors memories: {nearest_neighbors_memories}
+                                1. New Memory Note:
+                                - Original Category: {category}  # Pass the original category of the new note
+                                - Timestamp: {timestamp}        # Pass the timestamp of the new note
+                                - Content (User & Assistant interaction):
+                                    {content}
+                                - Existing Keywords (if any): {keywords}
+                                - Existing Context (if any): {context}
 
-                             
+                                2. Nearest Neighbors Memories (Contextual Information):
+                                (Note: Each neighbor has an ID, timestamp, category, tags, context, and content)
+                                {nearest_neighbors_memories}
 
-                                Based on this information, determine:
-                                1. Should this memory be evolved? Consider its relationships with other memories.
-                                2. What specific actions should be taken (strengthen, update_neighbor)?
-                                   2.1 If choose to strengthen the connection, which memory should it be connected to? Can you give the updated tags of this memory?
-                                   2.2 If choose to update_neighbor, you can update the context and tags of these memories based on the understanding of these memories. If the context and the tags are not updated, the new context and tags should be the same as the original ones. Generate the new context and tags in the sequential order of the input neighbors.
-                                
-                                
-                                Tags should be determined by the content of these characteristic of these memories, which can be used to retrieve them later and categorize them.
-                                Note that the length of new_tags_neighborhood must equal the number of input neighbors, and the length of new_context_neighborhood must equal the number of input neighbors.
-                                For 'suggested_connections', provide a list of direct, clean UUID strings of the neighbor memories you want to connect to. Do NOT include extra quotes or any other formatting around the UUIDs. If no connections are suggested, provide an empty list [].
+                                The number of actual neighbors provided is: {neighbor_number}.
 
-                                The number of neighbors is {neighbor_number}.
-                                Return your decision in JSON format with the following structure:
+                                YOUR TASK:
+                                Based on all the provided information, make decisions about how this "New Memory Note" should be processed and potentially linked. Return your decision as a VALID JSON object adhering to the schema below.
+
+                                DECISION SCHEMA:
+
+                                1.  `should_evolve` (boolean):
+                                    Set to `True` if the "New Memory Note" is significant enough to warrant linking to existing memories or refining its own metadata. Set to `False` if it's trivial, redundant, or doesn't add much value.
+
+                                2.  `actions` (list of strings):
+                                    If `should_evolve` is `True`, specify actions. Can be ["strengthen"], ["update_neighbor"], or both. If `should_evolve` is `False`, this should be an empty list `[]`.
+                                    - "strengthen": Form new links from the "New Memory Note" to some of its neighbors.
+                                    - "update_neighbor": Refine the context or tags of some of the "Nearest Neighbors Memories" based on insights from the "New Memory Note".
+
+                                3.  `suggested_connections` (list of strings):
+                                    If "strengthen" is in `actions`, provide a list of UUID strings corresponding to the IDs of the **"Nearest Neighbors Memories"** that were provided to you above.
+                                    You MUST ONLY select IDs from the {neighbor_number} neighbors listed in the "Nearest Neighbors Memories" section.
+                                    Do NOT invent or suggest IDs that were not part of the provided neighbors.
+                                    The purpose is to link the "New Memory Note" to one or more of these *specific* {neighbor_number} neighbors if a strong semantic connection exists.
+                                    Example: If "Nearest Neighbors Memories" included a neighbor with ID "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", and you want to connect to it, include that ID in this list.
+                                    Provide clean UUID strings, e.g., `["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"]`.
+                                    If no connections to the *provided neighbors* are appropriate, provide an empty list `[]`.
+
+                                4.  `new_note_refined_tags` (list of strings):  // CHANGED FROM tags_to_update
+                                    Provide a list of 3-5 specific, descriptive tags for the "New Memory Note" itself. These tags should capture the core entities, topics, user sentiments, or user facts from the "New Memory Note"'s content.
+                                    Examples: ["Socrates", "philosophy_interest", "ancient_Greece", "user_likes_topic"], ["Peppy_name_introduction", "personal_info"].
+                                    These tags will REPLACE any existing tags on the new note, except for its original category (e.g., 'preference', 'personal_info', 'conversation_turn'), which will be preserved.
+
+                                5.  `new_note_refined_context` (string): // NEW FIELD
+                                    Provide a concise, one-sentence summary or refined context for the "New Memory Note" itself. This should capture the essence of this specific user-assistant interaction.
+                                    Example: "User Peppy expressed a strong interest in Socrates and ancient Greek history."
+
+                                6.  `new_context_neighborhood` (list of strings):
+                                    If "update_neighbor" is in `actions`, provide a list of new context strings, one for each of the {neighbor_number} neighbors identified in "Nearest Neighbors Memories".
+                                    Carefully review each neighbor. If the "New Memory Note" provides significant new insight or clarification that REFINE'S that specific neighbor's existing context, provide the new, improved context string for that neighbor.
+                                    If a neighbor's current context is already accurate and sufficient, or if the new note doesn't add relevant information TO THAT SPECIFIC NEIGHBOR, you MUST repeat that neighbor's ORIGINAL context string (as provided in "Nearest Neighbors Memories") for that position in the list.
+                                    The list length MUST match `neighbor_number`.
+                                    Example (if neighbor_number is 2 and only neighbor 0 is updated): `["This is an updated, more precise context for neighbor 0.", "Original context of neighbor 1 as it was provided to you."]`
+
+                                7.  `new_tags_neighborhood` (list of lists of strings):
+                                    If "update_neighbor" is in `actions`, provide a list of new tag lists, one for each of the {neighbor_number} neighbors.
+                                    For each neighbor, if the "New Memory Note" helps to add more specific, descriptive, or clarifying tags, provide the complete NEW list of tags for that neighbor. These new tags will REPLACE its old tags, but its original category will be preserved by the system.
+                                    If a neighbor's current tags are already optimal, or if the new note doesn't warrant changing its tags, you MUST provide that neighbor's ORIGINAL list of tags (as provided in "Nearest Neighbors Memories") for that position in the outer list.
+                                    The outer list length MUST match `neighbor_number`.
+                                    Example (if neighbor_number is 2 and only neighbor 0's tags are refined): `[["new_topic", "clarified_entity", "user_sentiment_positive"], ["original_tag_X", "original_tag_Y"]]`
+
+                                JSON OUTPUT FORMAT:
+                                Return your decision in JSON format (this below is an example DO NOT RETURN THIS PLEASE):
                                 {{
-                                    "should_evolve": True or False,
+                                    "should_evolve": true,
                                     "actions": ["strengthen", "update_neighbor"],
-                                    "suggested_connections": ["neighbor_memory_ids"], 
-                                    "tags_to_update": ["tag_1",..."tag_n"], 
-                                    "new_context_neighborhood": ["new context",...,"new context"],
-                                    "new_tags_neighborhood": [["tag_1",...,"tag_n"],...["tag_1",...,"tag_n"]],
+                                    "suggested_connections": ["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"],
+                                    "new_note_refined_tags": ["Socrates", "philosophy_interest", "ancient_Greece"],
+                                    "new_note_refined_context": "User Peppy expressed interest in Socrates and his philosophy.",
+                                    "new_context_neighborhood": ["Updated context for neighbor 0.", "Original context for neighbor 1 from input.", "Original context for neighbor 2 from input."],
+                                    "new_tags_neighborhood": [["refined_tag_A", "refined_tag_B"], ["original_tag_X_from_input"], ["original_tag_Y_from_input", "original_tag_Z_from_input"]]
                                 }}
                                 '''
         
@@ -442,8 +487,9 @@ class AgenticMemorySystem:
                 continue
 
             # Attempt 2: Regex for "memory index:X" format (case-insensitive)
-            # Attempt 2: Regex for "memory index:X" or "memory index X" format (case-insensitive)
             if not parsed_successfully:
+                logger.debug(f"Attempt 3: Trying to match ref='{ref}' (cleaned_ref='{cleaned_ref}') against neighbor_ids.")
+                logger.debug(f"Neighbor IDs available for matching: {neighbor_ids}")
                 # Regex specifically for "memory index <number>"
                 match_space = re.search(r"memory\s+index\s+(\d+)", cleaned_ref, re.IGNORECASE)
                 # Regex specifically for "memory index:<number>"
@@ -466,21 +512,25 @@ class AgenticMemorySystem:
             if parsed_successfully:
                 continue
 
-            # Attempt 3: Match against `neighbor_ids` if the reference is an ID itself
-            if not parsed_successfully and cleaned_ref in neighbor_ids:
-                try:
-                    idx = neighbor_ids.index(cleaned_ref)
-                    # idx is guaranteed to be < max_index if found
-                    parsed_indices.add(idx)
-                    parsed_successfully = True
-                    logger.debug(f"Parsed LLM connection reference '{ref}' as direct ID match, index: {idx}")
-                except ValueError:
-                    # This case should ideally not be reached if `cleaned_ref in neighbor_ids` is true
-                    logger.warning(f"Reference '{cleaned_ref}' was in neighbor_ids but index() failed. This is unexpected. Skipping.")
-
+            # Attempt 3: Direct ID match in neighbor_ids
             if not parsed_successfully:
-                logger.warning(f"Could not parse LLM connection reference '{ref}' to a valid index or ID. Skipping.")
-                
+                # Normalize case for comparison
+                normalized_cleaned_ref = cleaned_ref.lower()
+                normalized_neighbor_ids = [nid.lower() for nid in neighbor_ids]
+
+                if normalized_cleaned_ref in normalized_neighbor_ids:
+                    try:
+                        # Get original index from original neighbor_ids list
+                        original_id_index = normalized_neighbor_ids.index(normalized_cleaned_ref)
+                        idx = original_id_index # this index corresponds to the original neighbor_ids list
+                        parsed_indices.add(idx)
+                        parsed_successfully = True
+                        logger.debug(f"Parsed LLM connection reference '{ref}' as direct ID match, index: {idx}")
+                    except ValueError:
+                        # This case should ideally not be reached if `cleaned_ref in neighbor_ids` is true
+                        logger.warning(f"Reference '{cleaned_ref}' was in neighbor_ids but index() failed. This is unexpected. Skipping.")
+        
+        logger.debug(f"Final parsed_indices before sorting: {parsed_indices}")
         return sorted(list(parsed_indices))
 
     def read(self, memory_id: str) -> Optional[MemoryNote]:
@@ -733,127 +783,184 @@ class AgenticMemorySystem:
             return []
 
 
+
     def process_memory(self, note: MemoryNote) -> Tuple[bool, MemoryNote]:
-        if not self.memories or len(self.memories) == 0: # Check if self.memories is empty
-            logger.info(f"DEBUG process_memory: No other memories exist. Skipping evolution for note ID {note.id}.")
-            return False, note
-            
+        if not self.memories or len(self.memories) == 0:
+            logger.info(f"DEBUG process_memory: No other memories exist (excluding current). Skipping evolution for note ID {note.id}.")
+            # Even if no other memories, we might want to refine the new note itself.
+            # Let's analyze its content for initial tags/context if it doesn't have good ones.
+            if not note.keywords or not note.context or note.context == "General" or not note.tags:
+                 analysis = self.analyze_content(note.content)
+                 note.keywords = list(set(note.keywords + analysis.get("keywords", []))) # Merge
+                 if not note.context or note.context == "General":
+                     note.context = analysis.get("context", "General")
+                 # For tags, analyze_content might provide initial topical tags.
+                 # The evolution prompt's new_note_refined_tags will then be merged with the category.
+                 note.tags = list(set(note.tags + analysis.get("tags", [])))
+                 logger.info(f"DEBUG process_memory: Initial self-analysis for note {note.id}. Keywords: {note.keywords}, Context: {note.context}, Tags: {note.tags}")
+
+            # Preserve original category and merge with any self-analyzed tags
+            final_tags = set(tag.strip() for tag in note.tags if tag and tag.strip())
+            if note.category and note.category.strip() and note.category != "Uncategorized":
+                final_tags.add(note.category.strip())
+            note.tags = sorted(list(final_tags))
+            return False, note # No evolution actions if no neighbors
+
         try:
             # Get nearest neighbors: text for LLM, list of their IDs, and list of their Note objects
             neighbors_text_for_llm, neighbor_ids, neighbor_notes = self.find_related_memories(note.content, k=5)
             
-            if not neighbor_ids: # No valid neighbors found
-                logger.info(f"DEBUG process_memory: No valid neighbors found for note ID {note.id}. Skipping evolution.")
-                return False, note
+            # If no *actual* neighbors found by semantic search, we can still try to refine the note itself
+            if not neighbor_ids and not neighbor_notes:
+                logger.info(f"DEBUG process_memory: No valid neighbors found for note ID {note.id}. Attempting self-refinement only.")
+                # Perform content analysis for the note itself if its metadata is sparse
+                if not note.keywords or not note.context or note.context == "General" or not note.tags:
+                    analysis = self.analyze_content(note.content)
+                    note.keywords = list(set(note.keywords + analysis.get("keywords", [])))
+                    if not note.context or note.context == "General":
+                        note.context = analysis.get("context", "General")
+                    note.tags = list(set(note.tags + analysis.get("tags", [])))
+                    logger.info(f"DEBUG process_memory: Self-analysis for note {note.id} (no neighbors). Keywords: {note.keywords}, Context: {note.context}, Tags: {note.tags}")
                 
+                # Preserve original category and merge with any self-analyzed tags
+                final_tags = set(tag.strip() for tag in note.tags if tag and tag.strip())
+                if note.category and note.category.strip() and note.category != "Uncategorized":
+                    final_tags.add(note.category.strip())
+                note.tags = sorted(list(final_tags))
+                return False, note # No evolution actions as no neighbors to link or update
+
             prompt = self._evolution_system_prompt.format(
+                category=note.category, # NEW: Pass original category
+                timestamp=note.timestamp, # NEW: Pass timestamp
                 content=note.content,
-                context=note.context,
+                context=note.context,    # This is the note's *current/original* context
                 keywords=str(note.keywords),
-                nearest_neighbors_memories=neighbors_text_for_llm, # Use the detailed text
-                neighbor_number=len(neighbor_ids) # Use the actual number of neighbors found
+                nearest_neighbors_memories=neighbors_text_for_llm,
+                neighbor_number=len(neighbor_ids)
             )
             
             try:
-                response = self.llm_controller.llm.get_completion(
+                response_str = self.llm_controller.llm.get_completion( # Renamed to response_str
                     prompt,
+                    temperature=0.1,
                     response_format={"type": "json_schema", "json_schema": {
-                        "name": "response",
+                        "name": "evolution_decision", # More descriptive schema name
                         "schema": {
                             "type": "object",
                             "properties": {
                                 "should_evolve": {"type": "boolean"},
                                 "actions": {"type": "array", "items": {"type": "string"}},
                                 "suggested_connections": {"type": "array", "items": {"type": "string"}},
+                                "new_note_refined_tags": {"type": "array", "items": {"type": "string"}}, 
+                                "new_note_refined_context": {"type": "string"}, 
                                 "new_context_neighborhood": {"type": "array", "items": {"type": "string"}},
-                                "tags_to_update": {"type": "array", "items": {"type": "string"}},
                                 "new_tags_neighborhood": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
                             },
                             "required": ["should_evolve", "actions", "suggested_connections", 
-                                      "tags_to_update", "new_context_neighborhood", "new_tags_neighborhood"],
+                                         "new_note_refined_tags", "new_note_refined_context", 
+                                         "new_context_neighborhood", "new_tags_neighborhood"],
                         },
                     }}
                 )
+                logger.debug(f"RAW LLM Response String for Evolution: {response_str}")
+                response_json = json.loads(response_str)
                 
-                response_json = json.loads(response)
                 should_evolve = response_json.get("should_evolve", False)
                 
-                logger.info(f"DEBUG process_memory: Note ID {note.id}, Original Tags: {note.tags}, Original Category: {note.category}")
                 logger.info(f"DEBUG process_memory: LLM Evolution response for note {note.id}: {response_json}")
 
-                if should_evolve:
+                # --- Refine the NEW NOTE itself based on LLM output ---
+                llm_new_note_tags_raw = response_json.get("new_note_refined_tags", [])
+                llm_suggested_new_note_tags = []
+                if isinstance(llm_new_note_tags_raw, list):
+                    llm_suggested_new_note_tags = [str(tag).strip() for tag in llm_new_note_tags_raw if isinstance(tag, (str, int, float)) and str(tag).strip()]
+                elif llm_new_note_tags_raw is not None:
+                    logger.warning(f"LLM returned non-list for new_note_refined_tags: {llm_new_note_tags_raw}. Ignoring.")
+
+                # Preserve original category, then add new refined tags
+                current_note_final_tags = set()
+                if note.category and isinstance(note.category, str) and note.category.strip() and note.category != "Uncategorized":
+                    current_note_final_tags.add(note.category.strip())
+                current_note_final_tags.update(llm_suggested_new_note_tags)
+                note.tags = sorted([tag for tag in list(current_note_final_tags) if tag]) # Ensure sorted and no empty strings
+                logger.info(f"DEBUG process_memory: Note ID {note.id}, Updated Tags after LLM refinement: {note.tags}")
+
+                # Update new note's context
+                new_note_context_from_llm = response_json.get("new_note_refined_context")
+                if isinstance(new_note_context_from_llm, str) and new_note_context_from_llm.strip():
+                    note.context = new_note_context_from_llm.strip()
+                    logger.info(f"DEBUG process_memory: Note ID {note.id}, Updated Context after LLM refinement: {note.context}")
+                # --- End of new note refinement ---
+
+
+                if should_evolve: # Only perform actions if should_evolve is true
                     actions = response_json.get("actions", [])
                     
                     for action in actions:
                         if action == "strengthen":
                             llm_connection_refs = response_json.get("suggested_connections", [])
+                            # Pass neighbor_ids to the parser
                             llm_suggested_indices = self._parse_llm_connection_indices(llm_connection_refs, neighbor_ids, len(neighbor_ids))
                             
-                            actual_ids_to_link = [neighbor_ids[idx] for idx in llm_suggested_indices]
+                            actual_ids_to_link = [neighbor_ids[idx] for idx in llm_suggested_indices if idx < len(neighbor_ids)] # safety check
                             
-                            current_links = set(note.links)
+                            current_links = set(note.links) # Assuming note.links is already a list
                             current_links.update(actual_ids_to_link)
                             note.links = list(current_links)
                             logger.info(f"DEBUG process_memory/strengthen: Note ID {note.id} linked with IDs: {actual_ids_to_link}. New links: {note.links}")
-
-                            # Tag update logic for the current note
-                            llm_tags_raw = response_json.get("tags_to_update")
-                            llm_suggested_additional_tags = []
-                            if isinstance(llm_tags_raw, list):
-                                llm_suggested_additional_tags = [str(tag).strip() for tag in llm_tags_raw if isinstance(tag, (str, int, float)) and str(tag).strip()]
-                            elif llm_tags_raw is not None:
-                                logger.warning(f"LLM returned non-list for tags_to_update: {llm_tags_raw}. Ignoring these LLM tags.")
-                            
-                            current_note_final_tags = set(tag for tag in note.tags if tag) # Start with existing non-empty tags
-                            if note.category and isinstance(note.category, str) and note.category.strip():
-                                current_note_final_tags.add(note.category)
-                            current_note_final_tags.update(llm_suggested_additional_tags)
-                            note.tags = sorted([tag for tag in list(current_note_final_tags) if tag]) # Ensure sorted and no empty strings
-                            logger.info(f"DEBUG process_memory/strengthen: Note ID {note.id}, Updated Tags: {note.tags}")
 
                         elif action == "update_neighbor":
                             new_contexts_for_neighbors = response_json.get("new_context_neighborhood", [])
                             new_tags_for_neighbors_outer = response_json.get("new_tags_neighborhood", [])
                             
-                            num_neighbors_to_update = min(len(neighbor_notes), len(new_contexts_for_neighbors), len(new_tags_for_neighbors_outer))
+                            num_neighbors_to_update = min(len(neighbor_notes), 
+                                                          len(new_contexts_for_neighbors) if isinstance(new_contexts_for_neighbors, list) else 0, 
+                                                          len(new_tags_for_neighbors_outer) if isinstance(new_tags_for_neighbors_outer, list) else 0)
+                            
                             logger.info(f"DEBUG process_memory/update_neighbor: Attempting to update {num_neighbors_to_update} neighbors for note {note.id}.")
 
                             for i in range(num_neighbors_to_update):
-                                neighbor_note_to_update = neighbor_notes[i] # Get the actual MemoryNote object
+                                neighbor_note_to_update = neighbor_notes[i]
                                 
-                                # Update context
-                                if i < len(new_contexts_for_neighbors) and isinstance(new_contexts_for_neighbors[i], str):
-                                    neighbor_note_to_update.context = new_contexts_for_neighbors[i]
+                                # Update neighbor context
+                                if i < len(new_contexts_for_neighbors) and isinstance(new_contexts_for_neighbors[i], str) and new_contexts_for_neighbors[i].strip():
+                                    neighbor_note_to_update.context = new_contexts_for_neighbors[i].strip()
                                 
-                                # Update tags
+                                # Update neighbor tags
                                 if i < len(new_tags_for_neighbors_outer) and isinstance(new_tags_for_neighbors_outer[i], list):
-                                    llm_suggested_tags_for_neighbor = set(str(tag).strip() for tag in new_tags_for_neighbors_outer[i] if isinstance(tag, (str, int, float)) and str(tag).strip())
+                                    llm_suggested_tags_for_neighbor_raw = new_tags_for_neighbors_outer[i]
+                                    llm_suggested_tags_for_neighbor = set(str(tag).strip() for tag in llm_suggested_tags_for_neighbor_raw if isinstance(tag, (str, int, float)) and str(tag).strip())
                                     
-                                    final_neighbor_tags = set(tag for tag in neighbor_note_to_update.tags if tag) # Start with neighbor's existing non-empty tags
-                                    if neighbor_note_to_update.category and isinstance(neighbor_note_to_update.category, str) and neighbor_note_to_update.category.strip():
-                                        final_neighbor_tags.add(neighbor_note_to_update.category) # Preserve its own category
-                                    final_neighbor_tags.update(llm_suggested_tags_for_neighbor) # Add LLM suggestions
+                                    final_neighbor_tags = set()
+                                    if neighbor_note_to_update.category and isinstance(neighbor_note_to_update.category, str) and neighbor_note_to_update.category.strip() and neighbor_note_to_update.category != "Uncategorized":
+                                        final_neighbor_tags.add(neighbor_note_to_update.category.strip())
+                                    final_neighbor_tags.update(llm_suggested_tags_for_neighbor)
                                     neighbor_note_to_update.tags = sorted([tag for tag in list(final_neighbor_tags) if tag])
                                 
-                                # Persist changes to the neighbor
                                 logger.info(f"DEBUG process_memory/update_neighbor: Updating neighbor ID {neighbor_note_to_update.id}. New Context: '{neighbor_note_to_update.context}', New Tags: {neighbor_note_to_update.tags}")
-                                self.update(
+                                self.update( # This calls ChromaRetriever.add_document
                                     memory_id=neighbor_note_to_update.id,
-                                    content=neighbor_note_to_update.content, # Content isn't changed by LLM in this action
+                                    content=neighbor_note_to_update.content,
                                     context=neighbor_note_to_update.context,
                                     tags=neighbor_note_to_update.tags,
-                                    keywords=neighbor_note_to_update.keywords, # Keywords aren't changed by LLM in this action
-                                    links=neighbor_note_to_update.links # Links aren't changed by LLM in this action for the neighbor
+                                    keywords=neighbor_note_to_update.keywords,
+                                    links=neighbor_note_to_update.links,
+                                    # Ensure all relevant fields of MemoryNote are passed if they can be updated
+                                    category=neighbor_note_to_update.category,
+                                    timestamp=neighbor_note_to_update.timestamp,
+                                    retrieval_count=neighbor_note_to_update.retrieval_count,
+                                    evolution_history=neighbor_note_to_update.evolution_history
                                 )
-                return should_evolve, note
+                return should_evolve, note # Return the (potentially modified) new note
                 
             except (json.JSONDecodeError, KeyError) as e:
-                logger.error(f"Error processing LLM evolution response for note ID {note.id}: {str(e)}. Original note returned.", exc_info=True)
+                logger.error(f"Error processing LLM evolution response for note ID {note.id}: {str(e)}. Original note returned, possibly with initial analysis.", exc_info=True)
                 return False, note 
             except Exception as e:
-                logger.error(f"Unexpected error in memory evolution LLM call for note ID {note.id}: {str(e)}. Original note returned.", exc_info=True)
+                logger.error(f"Unexpected error in memory evolution LLM call for note ID {note.id}: {str(e)}. Original note returned, possibly with initial analysis.", exc_info=True)
                 return False, note
                 
         except Exception as e:
             logger.error(f"Error in process_memory (e.g., finding neighbors) for note ID {note.id}: {str(e)}. Original note returned.", exc_info=True)
             return False, note
+
