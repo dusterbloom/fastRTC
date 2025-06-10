@@ -23,16 +23,14 @@ from ..audio import (
 )
 from ..memory import AMemMemoryManager, ResponseCache, ConversationBuffer
 from ..services import LLMService, AsyncManager
-from ..config.settings import (
-    DEFAULT_LANGUAGE, USE_OLLAMA_FOR_CONVERSATION, OLLAMA_CONVERSATIONAL_MODEL,
-    OLLAMA_URL, LM_STUDIO_MODEL, LM_STUDIO_URL, AMEM_LLM_MODEL, AMEM_EMBEDDER_MODEL,
-    HF_MODEL_ID
-)
+from src.config.settings import load_config
 from ..config.language_config import LANGUAGE_NAMES, WHISPER_TO_KOKORO_LANG
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Centralized configuration
+config = load_config()
 
 class VoiceAssistant:
     """
@@ -73,17 +71,17 @@ class VoiceAssistant:
             conversation_buffer: Conversation tracking buffer
             llm_service: LLM service for response generation
             async_manager: Async operations manager
-            config: Optional configuration dictionary for component settings
+            config: Application configuration (required)
         """
         logger.info("🧠 Initializing VoiceAssistant with dependency injection...")
-        
+
         # Store configuration
-        self.config = config or {}
-        
+        self.config = config
+
         # Session and user tracking (set early for memory manager)
         self.user_id = "voice_user_01"
         self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-        
+
         # Initialize or use provided components
         self.audio_processor = audio_processor or BluetoothAudioProcessor()
         self.stt_engine = stt_engine or HuggingFaceSTTEngine()
@@ -94,22 +92,22 @@ class VoiceAssistant:
         self.conversation_buffer = conversation_buffer or ConversationBuffer()
         self.llm_service = llm_service or LLMService()
         self.async_manager = async_manager or AsyncManager()
-        
+
         # Initialize memory manager with Qdrant setup
         self.memory_manager = memory_manager or self._setup_memory_manager()
-        
+
         # Conversation state
-        self.current_language = DEFAULT_LANGUAGE
+        self.current_language = self.config.audio.get("default_language", "en") if hasattr(self.config.audio, "get") else getattr(self.config.audio, "default_language", "en")
         self.turn_count = 0
         self.voice_detection_successes = 0
         self.total_response_time = deque(maxlen=20)
-        
+
         # Async resources
         self.http_session: Optional[aiohttp.ClientSession] = None
-        
+
         # Cache configuration
         self.cache_ttl_seconds = 180
-        
+
         logger.info(f"👤 User ID: {self.user_id}, Session: {self.session_id}")
         self._log_configuration()
     
@@ -126,7 +124,13 @@ class VoiceAssistant:
         os.environ["OPENAI_API_KEY"] = "dummy-key-for-local-use"
         
         # Initialize Qdrant client
-        qclient = QdrantClient(host="localhost", port=6333)
+        # Parse Qdrant host and port from centralized config
+        from urllib.parse import urlparse
+        qdrant_url = getattr(config.network, "qdrant_url", "http://localhost:6333")
+        parsed = urlparse(qdrant_url)
+        qdrant_host = parsed.hostname or "localhost"
+        qdrant_port = parsed.port or 6333
+        qclient = QdrantClient(host=qdrant_host, port=qdrant_port)
         collections_response = qclient.get_collections()
         collection_names = [c.name for c in collections_response.collections]
         
@@ -144,13 +148,13 @@ class VoiceAssistant:
     
     def _log_configuration(self):
         """Log the current system configuration."""
-        if USE_OLLAMA_FOR_CONVERSATION:
-            logger.info(f"🗣️ Conversational LLM: Ollama ({OLLAMA_CONVERSATIONAL_MODEL} via {OLLAMA_URL})")
+        if config.llm.use_ollama:
+            logger.info(f"🗣️ Conversational LLM: Ollama ({config.llm.ollama_model} via {config.llm.ollama_url})")
         else:
-            logger.info(f"🗣️ Conversational LLM: LM Studio ({LM_STUDIO_MODEL} via {LM_STUDIO_URL})")
+            logger.info(f"🗣️ Conversational LLM: LM Studio ({config.llm.lm_studio_model} via {config.llm.lm_studio_url})")
         
-        logger.info(f"🧠 A-MEM System: {AMEM_LLM_MODEL} with {AMEM_EMBEDDER_MODEL} embeddings")
-        logger.info(f"🎤 STT System: Hugging Face Transformers (Model: {HF_MODEL_ID})")
+        logger.info(f"🧠 A-MEM System: {config.memory.llm_model} with {config.memory.embedder_model} embeddings")
+        logger.info(f"🎤 STT System: Hugging Face Transformers (Model: {config.audio.hf_model_id})")
     
     async def initialize_async(self):
         """Initialize async components for the voice assistant."""

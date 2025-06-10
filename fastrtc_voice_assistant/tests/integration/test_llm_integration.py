@@ -20,13 +20,14 @@ class TestLLMIntegration:
     @pytest.fixture
     def llm_service(self):
         """Create LLM service instance with real Ollama."""
+        config = LLMConfig()
         return LLMService(
-            use_ollama=True,
-            ollama_url="http://localhost:11434",
-            ollama_model="llama3.2:3b",  # Use actual available model
-            timeout=10.0,  # Increase timeout for real requests
-            max_tokens=100,  # Reduce tokens for faster testing
-            temperature=0.1  # Lower temperature for more consistent responses
+            use_ollama=getattr(config, "use_ollama", True),
+            ollama_url=config.ollama_url,
+            ollama_model=config.ollama_model,
+            timeout=config.timeout,
+            max_tokens=config.max_tokens,
+            temperature=getattr(config, "temperature", 0.1)
         )
     
     @pytest.fixture
@@ -37,7 +38,7 @@ class TestLLMIntegration:
     @pytest.fixture
     def response_cache(self):
         """Create response cache."""
-        return ResponseCache(ttl_seconds=300, max_entries=100)
+        return ResponseCache(ttl_seconds=MemoryConfig().cache_ttl_seconds, max_entries=100)
     
     @pytest.fixture
     def conversation_buffer(self):

@@ -41,12 +41,15 @@ import traceback
 from fastrtc.utils import AdditionalOutputs
 from src.integration.fastrtc_bridge import FastRTCBridge
 
-AUDIO_SAMPLE_RATE = 16000
-MINIMAL_SILENT_FRAME_DURATION_MS = 20
-MINIMAL_SILENT_SAMPLES = int(AUDIO_SAMPLE_RATE * (MINIMAL_SILENT_FRAME_DURATION_MS / 1000.0))
-SILENT_AUDIO_CHUNK_ARRAY = np.zeros(MINIMAL_SILENT_SAMPLES, dtype=np.float32)
-SILENT_AUDIO_FRAME_TUPLE = (AUDIO_SAMPLE_RATE, SILENT_AUDIO_CHUNK_ARRAY)
+from src.config.audio_config import (
+    AUDIO_SAMPLE_RATE,
+    MINIMAL_SILENT_FRAME_DURATION_MS,
+    MINIMAL_SILENT_SAMPLES,
+    SILENT_AUDIO_CHUNK_ARRAY,
+    SILENT_AUDIO_FRAME_TUPLE,
+)
 EMPTY_AUDIO_YIELD_OUTPUT = (SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs())
+from src.config.settings import load_config
 
 # Set up logging
 setup_logging()
@@ -290,7 +293,7 @@ def setup_async_environment():
     global main_event_loop, voice_assistant, async_worker_thread
     
     print_info("Creating VoiceAssistant instance...")
-    voice_assistant = VoiceAssistant()
+    voice_assistant = VoiceAssistant(config=load_config())
 
     def run_async_loop_in_thread():
         global main_event_loop, voice_assistant

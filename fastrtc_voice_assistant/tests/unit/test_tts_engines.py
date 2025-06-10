@@ -10,6 +10,7 @@ from src.core.interfaces import AudioData
 from src.core.exceptions import TTSError
 from src.audio.engines.tts.base import BaseTTSEngine
 from src.audio.engines.tts.kokoro_tts import KokoroTTSEngine, KokoroTTSOptions
+from src.config.settings import AudioConfig
 
 
 class TestBaseTTSEngine:
@@ -21,7 +22,8 @@ class TestBaseTTSEngine:
         class TestTTSEngine(BaseTTSEngine):
             async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
                 samples = np.random.random(1000).astype(np.float32)
-                return AudioData(samples=samples, sample_rate=24000, duration=1000/24000)
+                sample_rate = AudioConfig().sample_rate
+                return AudioData(samples=samples, sample_rate=sample_rate, duration=1000/sample_rate)
             
             def get_available_voices(self, language: str) -> list:
                 return ["voice1", "voice2"]
@@ -47,7 +49,8 @@ class TestBaseTTSEngine:
             async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
                 await asyncio.sleep(0.001)  # Small delay for timing
                 samples = np.random.random(1000).astype(np.float32)
-                return AudioData(samples=samples, sample_rate=24000, duration=1000/24000)
+                sample_rate = AudioConfig().sample_rate
+                return AudioData(samples=samples, sample_rate=sample_rate, duration=1000/sample_rate)
             
             def get_available_voices(self, language: str) -> list:
                 return ["voice1"]
@@ -60,7 +63,7 @@ class TestBaseTTSEngine:
         # Check result
         assert isinstance(result, AudioData)
         assert len(result.samples) == 1000
-        assert result.sample_rate == 24000
+        assert result.sample_rate == AudioConfig().sample_rate
         
         # Check stats
         stats = engine.get_stats()
@@ -104,7 +107,8 @@ class TestBaseTTSEngine:
         class TestTTSEngine(BaseTTSEngine):
             async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
                 samples = np.random.random(100).astype(np.float32)
-                return AudioData(samples=samples, sample_rate=24000, duration=100/24000)
+                sample_rate = AudioConfig().sample_rate
+                return AudioData(samples=samples, sample_rate=sample_rate, duration=100/sample_rate)
             
             def get_available_voices(self, language: str) -> list:
                 return ["voice1"]
@@ -124,7 +128,8 @@ class TestBaseTTSEngine:
             
             async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
                 samples = np.random.random(100).astype(np.float32)
-                return AudioData(samples=samples, sample_rate=24000, duration=100/24000)
+                sample_rate = AudioConfig().sample_rate
+                return AudioData(samples=samples, sample_rate=sample_rate, duration=100/sample_rate)
             
             def get_available_voices(self, language: str) -> list:
                 return ["voice1"]
@@ -145,7 +150,8 @@ class TestBaseTTSEngine:
             
             async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
                 samples = np.random.random(100).astype(np.float32)
-                return AudioData(samples=samples, sample_rate=24000, duration=100/24000)
+                sample_rate = AudioConfig().sample_rate
+                return AudioData(samples=samples, sample_rate=sample_rate, duration=100/sample_rate)
             
             def get_available_voices(self, language: str) -> list:
                 return ["voice1"]

@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from src.memory.cache import ResponseCache, CacheEntry
+from src.config.settings import MemoryConfig
 
 
 class TestCacheEntry:
@@ -32,11 +33,11 @@ class TestResponseCache:
     @pytest.fixture
     def response_cache(self):
         """Create response cache instance."""
-        return ResponseCache(ttl_seconds=300, max_entries=100)
+        return ResponseCache(ttl_seconds=MemoryConfig().cache_ttl_seconds, max_entries=100)
     
     def test_initialization(self, response_cache):
         """Test response cache initialization."""
-        assert response_cache.ttl_seconds == 300
+        assert response_cache.ttl_seconds == MemoryConfig().cache_ttl_seconds
         assert response_cache.max_entries == 100
         assert len(response_cache) == 0
         assert response_cache._stats['hits'] == 0

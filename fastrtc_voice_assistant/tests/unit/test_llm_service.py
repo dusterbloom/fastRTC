@@ -16,13 +16,14 @@ class TestLLMService:
     @pytest.fixture
     def llm_service(self):
         """Create LLM service instance."""
+        config = LLMConfig()
         return LLMService(
-            use_ollama=True,
-            ollama_url="http://localhost:11434",
-            ollama_model="test-model",
-            timeout=5.0,
-            max_tokens=100,
-            temperature=0.7
+            use_ollama=config.use_ollama if hasattr(config, "use_ollama") else True,
+            ollama_url=config.ollama_url,
+            ollama_model=config.ollama_model,
+            timeout=config.timeout,
+            max_tokens=config.max_tokens,
+            temperature=getattr(config, "temperature", 0.7)
         )
     
     @pytest.fixture

@@ -17,12 +17,11 @@ from ..audio.engines.tts.kokoro_tts import KokoroTTSOptions
 from ..utils.async_utils import run_coro_from_sync_thread_with_timeout
 from ..utils.logging import get_logger
 from ..config.language_config import LANGUAGE_NAMES, LANGUAGE_ABBREVIATIONS, KOKORO_TTS_LANG_MAP
+from ..config.audio_config import AUDIO_SAMPLE_RATE, SILENT_AUDIO_FRAME_TUPLE
 
 logger = get_logger(__name__)
 
 # Audio constants
-AUDIO_SAMPLE_RATE = 16000
-SILENT_AUDIO_FRAME_TUPLE = (AUDIO_SAMPLE_RATE, np.array([], dtype=np.float32))
 EMPTY_AUDIO_YIELD_OUTPUT = (SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs())
 
 

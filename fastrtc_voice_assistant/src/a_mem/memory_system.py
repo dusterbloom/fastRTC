@@ -1,4 +1,7 @@
 import keyword
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Optional, Any, Tuple
 import uuid
 from datetime import datetime
@@ -83,6 +86,22 @@ class MemoryNote:
         self.evolution_history = evolution_history or []
 
 class AgenticMemorySystem:
+    def get_user_context(self) -> str:
+        """
+        Retrieve long-term user context for LLM prompt.
+        This should aggregate key facts, user info, and important memory notes.
+        """
+        # Example: Aggregate all memory notes tagged as 'user_info' or similar
+        user_context_notes = [
+            note.content for note in self.memories.values()
+            if 'user_info' in getattr(note, 'tags', [])
+        ]
+        # Fallback: Use all notes if no user_info tag
+        if not user_context_notes:
+            user_context_notes = [note.content for note in self.memories.values()]
+        context = "\n".join(user_context_notes)
+        logger.debug(f"[A-MEM] get_user_context: {context[:100]}...")
+        return context
     """Core memory system that manages memory notes and their evolution.
     
     This system provides:
@@ -783,6 +802,22 @@ class AgenticMemorySystem:
             return []
 
 
+
+    def process_user_turn(self, user_text: str) -> str:
+        """
+        Generate LLM response for user input, injecting long-term user context.
+        """
+        # 1. Retrieve long-term context
+        amem_context = self.get_user_context()
+        logger.debug(f"[A-MEM] Injecting context to LLM: {amem_context[:100]}...")
+
+        # 2. Build prompt with context
+        prompt = f"Context:\n{amem_context}\n\nUser: {user_text}\nAssistant:"
+
+        # 3. Call LLM
+        response = self.llm_controller.llm.get_completion(prompt)
+        # Optionally, update memory here as well
+        return response
 
     def process_memory(self, note: MemoryNote) -> Tuple[bool, MemoryNote]:
         if not self.memories or len(self.memories) == 0:

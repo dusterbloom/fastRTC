@@ -46,7 +46,8 @@ class TestBaseSTTEngine:
         
         # Create test audio
         samples = np.random.random(1000).astype(np.float32)
-        audio = AudioData(samples=samples, sample_rate=16000, duration=1000/16000)
+        sample_rate = AudioConfig().sample_rate
+        audio = AudioData(samples=samples, sample_rate=sample_rate, duration=1000/sample_rate)
         
         # Transcribe
         result = await engine.transcribe(audio)
@@ -78,7 +79,8 @@ class TestBaseSTTEngine:
         engine = FailingSTTEngine()
         
         samples = np.random.random(100).astype(np.float32)
-        audio = AudioData(samples=samples, sample_rate=16000, duration=100/16000)
+        sample_rate = AudioConfig().sample_rate
+        audio = AudioData(samples=samples, sample_rate=sample_rate, duration=100/sample_rate)
         
         with pytest.raises(STTError):
             await engine.transcribe(audio)
@@ -99,7 +101,8 @@ class TestBaseSTTEngine:
         engine = TestSTTEngine()  # Not set as available
         
         samples = np.random.random(100).astype(np.float32)
-        audio = AudioData(samples=samples, sample_rate=16000, duration=100/16000)
+        sample_rate = AudioConfig().sample_rate
+        audio = AudioData(samples=samples, sample_rate=sample_rate, duration=100/sample_rate)
         
         with pytest.raises(STTError, match="not available"):
             await engine.transcribe(audio)

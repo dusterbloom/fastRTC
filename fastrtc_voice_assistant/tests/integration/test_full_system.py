@@ -38,28 +38,10 @@ class TestFullSystemIntegration:
     def test_config(self, temp_config_dir):
         """Create test configuration."""
         return AppConfig(
-            audio=AudioConfig(
-                sample_rate=16000,
-                chunk_duration=2.0,
-                noise_threshold=0.15,
-                minimal_silent_frame_duration_ms=20
-            ),
-            memory=MemoryConfig(
-                llm_model="llama3.2:3b",
-                embedder_model="nomic-embed-text",
-                evolution_threshold=50,
-                cache_ttl_seconds=180
-            ),
-            llm=LLMConfig(
-                use_ollama=True,
-                ollama_url="http://localhost:11434",
-                ollama_model="llama3:8b-instruct-q4_K_M"
-            ),
-            tts=TTSConfig(
-                preferred_voice="af_heart",
-                fallback_voices=["af_alloy", "af_bella"],
-                speed=1.05
-            )
+            audio=AudioConfig(),
+            memory=MemoryConfig(),
+            llm=LLMConfig(),
+            tts=TTSConfig()
         )
     
     @pytest.fixture
