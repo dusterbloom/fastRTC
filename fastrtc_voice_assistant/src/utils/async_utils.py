@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 def run_coro_from_sync_thread_with_timeout(
     coro: Coroutine,
-    timeout: float = 4.0,
+    timeout: float = 10.0,
     event_loop: Optional[asyncio.AbstractEventLoop] = None
 ) -> Any:
     """

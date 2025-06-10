@@ -250,7 +250,7 @@ class StreamCallbackHandler:
             # Use async LLM service with timeout protection
             assistant_response_text = run_coro_from_sync_thread_with_timeout(
                 self.voice_assistant.get_llm_response_smart(user_text),
-                timeout=4.0,
+                timeout=10.0,
                 event_loop=self.event_loop
             )
         except TimeoutError:
