@@ -1,0 +1,108 @@
+{
+  "session_duration": 32.82571,
+  "total_conversation_turns": 6,
+  "total_memory_operations": 6,
+  "memory_ops_per_turn": 1.0,
+  "operation_types": {
+    "error": 6
+  },
+  "continuity_score": 0.2,
+  "conversation_log": [
+    {
+      "timestamp": "2025-06-10T15:09:08.446086",
+      "turn_number": 2,
+      "user_input": "What is my name?",
+      "assistant_response": "The user's name is Alice.",
+      "memory_context": null,
+      "memory_operations_count": 1
+    },
+    {
+      "timestamp": "2025-06-10T15:09:09.304441",
+      "turn_number": 3,
+      "user_input": "I also enjoy reading science fiction books",
+      "assistant_response": "Sci-fi books, huh? That's awesome! I've got a memory of you mentioning that before. It seems like we've connected some dots, Alice! Sci-fi because it makes you see the future today... and you love ancient Greece! There must be something about exploring different worlds or time periods that resonates with you, don't you think?",
+      "memory_context": null,
+      "memory_operations_count": 2
+    },
+    {
+      "timestamp": "2025-06-10T15:09:09.913670",
+      "turn_number": 4,
+      "user_input": "What do you know about my interests?",
+      "assistant_response": "I recall that you mentioned enjoying ancient Greece, sci-fi, and exploring what it means to see into the future. It's fascinating! I'd love to chat more about how these topics intersect or if there are any specific areas within them that spark your curiosity. What would you like to discuss, Alice?",
+      "memory_context": null,
+      "memory_operations_count": 3
+    },
+    {
+      "timestamp": "2025-06-10T15:09:10.340069",
+      "turn_number": 5,
+      "user_input": "I work as a software engineer at Google",
+      "assistant_response": "That's amazing, Alice! Working at Google must be an incredible experience. What part of the company do you enjoy the most? Is it the innovation, collaboration, or something else that drives your passion?",
+      "memory_context": null,
+      "memory_operations_count": 4
+    },
+    {
+      "timestamp": "2025-06-10T15:09:12.029522",
+      "turn_number": 6,
+      "user_input": "Tell me about myself",
+      "assistant_response": "Regarding 'Tell me about myself', I found these related memories: User: Hi there, Echo, how are you doing today?\nAssistant: I'm doing great, Peppy! It's always wonderful to chat with you; User: Hi there, Echo, how are you doing today?\nAssistant: I'm doing great, Peppy! It's always wonderful to chat with you; User: Hi there, Echo. Do you know what my name is?\nAssistant: Hello! I'm glad you're talking to me. Unfortunately, I don...",
+      "memory_context": null,
+      "memory_operations_count": 5
+    }
+  ],
+  "recent_memory_ops": [
+    {
+      "timestamp": "2025-06-10T15:09:08.446011",
+      "operation_type": "error",
+      "details": {
+        "scenario": 1,
+        "error": "'AMemMemoryManager' object has no attribute 'get_conversation_context'"
+      },
+      "turn_context": 1
+    },
+    {
+      "timestamp": "2025-06-10T15:09:08.446103",
+      "operation_type": "error",
+      "details": {
+        "scenario": 2,
+        "error": "'AMemMemoryManager' object has no attribute 'get_conversation_context'"
+      },
+      "turn_context": 2
+    },
+    {
+      "timestamp": "2025-06-10T15:09:09.304475",
+      "operation_type": "error",
+      "details": {
+        "scenario": 3,
+        "error": "'AMemMemoryManager' object has no attribute 'get_conversation_context'"
+      },
+      "turn_context": 3
+    },
+    {
+      "timestamp": "2025-06-10T15:09:09.913699",
+      "operation_type": "error",
+      "details": {
+        "scenario": 4,
+        "error": "'AMemMemoryManager' object has no attribute 'get_conversation_context'"
+      },
+      "turn_context": 4
+    },
+    {
+      "timestamp": "2025-06-10T15:09:10.340100",
+      "operation_type": "error",
+      "details": {
+        "scenario": 5,
+        "error": "'AMemMemoryManager' object has no attribute 'get_conversation_context'"
+      },
+      "turn_context": 5
+    },
+    {
+      "timestamp": "2025-06-10T15:09:12.029626",
+      "operation_type": "error",
+      "details": {
+        "scenario": 6,
+        "error": "'AMemMemoryManager' object has no attribute 'get_conversation_context'"
+      },
+      "turn_context": 6
+    }
+  ]
+}

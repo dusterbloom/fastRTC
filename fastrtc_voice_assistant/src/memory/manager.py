@@ -530,6 +530,18 @@ class AMemMemoryManager(MemoryManager):
         
         return "Key things you remember about the user: " + ". ".join(parts) + "."
     
+    async def get_conversation_context(self) -> str:
+        """Get conversation context for debugging and LLM integration.
+        
+        This method provides the conversation context that can be used by
+        debugging tools and LLM systems to understand what the assistant
+        knows about the user.
+        
+        Returns:
+            str: Conversation context information
+        """
+        return self.get_user_context()
+    
     async def clear_memory(self) -> bool:
         """Clear all memory for the current user.
         
