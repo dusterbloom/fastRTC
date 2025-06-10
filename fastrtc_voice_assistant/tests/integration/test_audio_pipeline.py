@@ -87,14 +87,14 @@ class TestAudioPipelineIntegration:
         )
     
     def test_audio_pipeline_basic_flow(self, callback_handler, mock_voice_assistant):
-        """Test the basic audio processing flow."""
-        # Mock audio data
-        sample_rate = 16000
-        audio_data = np.random.random(1024).astype(np.float32)
-        audio_tuple = (sample_rate, audio_data)
+        """Test the basic audio processing flow with real audio data."""
+        # Use real audio from audio_samples
+        audio_data = create_test_audio(duration=1.0, frequency=440, sample_rate=16000)
+        sample_rate = audio_data.sample_rate
+        audio_tuple = (sample_rate, audio_data.samples)
         
-        # Mock voice assistant methods
-        mock_voice_assistant.process_audio_array = Mock(return_value=(sample_rate, audio_data))
+        # Set up mock to handle real audio (simplified for now)
+        mock_voice_assistant.process_audio_array = Mock(return_value=(sample_rate, audio_data.samples))
         mock_voice_assistant.get_llm_response_smart = AsyncMock(return_value="I'm doing well, thank you!")
         
         # Process the audio stream
@@ -111,6 +111,10 @@ class TestAudioPipelineIntegration:
             audio_output, additional_outputs = result
             assert isinstance(audio_output, tuple)
             assert len(audio_output) == 2
+            sr, audio_array = audio_output
+            assert sr == sample_rate
+            assert isinstance(audio_array, np.ndarray)
+            assert audio_array.size > 0
     
     def test_audio_pipeline_empty_audio(self, callback_handler, mock_voice_assistant):
         """Test handling of empty audio input."""

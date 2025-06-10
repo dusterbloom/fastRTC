@@ -1,0 +1,44 @@
+Record samples for the test
+
+LANGUAGE_TEST_PHRASES = {
+    "english": [
+        "Hello, how are you today?",
+        "The weather is nice outside.",
+        "Can you help me with this task?"
+    ],
+    "italian": [
+        "Ciao, come stai oggi?",
+        "Il tempo è bello fuori.",
+        "Puoi aiutarmi con questo compito?"
+    ],
+    "spanish": [
+        "Hola, ¿cómo estás hoy?",
+        "El clima está agradable afuera.",
+        "¿Puedes ayudarme con esta tarea?"
+    ],
+    "french": [
+        "Bonjour, comment allez-vous aujourd'hui?",
+        "Le temps est agréable dehors.",
+        "Pouvez-vous m'aider avec cette tâche?"
+    ],
+    "portuguese": [
+        "Olá, como você está hoje?",
+        "O tempo está bom lá fora.",
+        "Você pode me ajudar com esta tarefa?"
+    ],
+    "japanese": [
+        "こんにちは、今日はいかがですか？",
+        "外の天気がいいですね。",
+        "この作業を手伝ってもらえますか？"
+    ],
+    "chinese": [
+        "你好，你今天怎么样？",
+        "外面天气很好。",
+        "你能帮我做这个任务吗？"
+    ],
+    "hindi": [
+        "नमस्ते, आज आप कैसे हैं?",
+        "बाहर मौसम अच्छा है।",
+        "क्या आप इस काम में मेरी मदद कर सकते हैं?"
+    ]
+}
