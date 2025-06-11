@@ -34,10 +34,10 @@ def get_assistant_service_dependency() -> AssistantService:
     """
     Dependency to get the global instance of AssistantService.
     """
-    if get_assistant_service() is None:
+    if assistant_service_instance is None:
         # This should ideally not happen if lifespan event ran correctly
         raise HTTPException(status_code=503, detail="Assistant service not available.")
-    return get_assistant_service()
+    return assistant_service_instance
 
 
 @router.post("/stt", response_model=STTResponse, dependencies=[Depends(get_api_key)])

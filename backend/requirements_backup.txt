@@ -1,0 +1,29 @@
+# FastAPI backend dependencies
+fastapi
+uvicorn[standard]
+pydantic>=1.10.0,<2.0.0
+# Note: pydantic-settings doesn't exist for v1, use pydantic.BaseSettings instead
+cachetools
+numpy
+python-multipart
+websockets
+
+# Dependencies needed by imported voice assistant code
+aiohttp
+requests
+soundfile
+transformers>=4.36.2
+qdrant-client
+sentence-transformers>=2.2.2
+chromadb>=0.4.22
+rank_bm25>=0.2.2
+nltk
+litellm
+
+# FastRTC dependencies (core only to avoid conflicts)
+# Note: Full fastrtc[vad,stt,tts,stopword] might have conflicts
+# Import what we need from the mounted voice assistant
+
+# Development
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

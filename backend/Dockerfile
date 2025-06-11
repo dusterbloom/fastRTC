@@ -1,34 +1,65 @@
 # Use an official Python runtime as a parent image
-FROM python:3.10-slim
+# Try ubuntu-based Python if slim fails
+FROM python:3.10
 
 # Set the working directory in the container
-WORKDIR /usr/src/app/backend
+WORKDIR /app
 
 # Set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app:/app/shared"
 
-# Install system dependencies (if any are known to be needed by VoiceAssistant or its deps)
-# For now, we'll assume standard Python deps are enough. Add if needed.
-# RUN apt-get update && apt-get install -y --no-install-recommends some-package
+# Install system dependencies required for audio processing and ML
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    gcc \
+    g++ \
+    build-essential \
+    python3-dev \
+    libffi-dev \
+    libssl-dev \
+    # Audio processing dependencies
+    ffmpeg \
+    libportaudio2 \
+    portaudio19-dev \
+    libasound2-dev \
+    # For faster numpy/scipy builds
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
 
 # Install Python dependencies
-COPY ./requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy the backend application code into the container
+# Copy the backend application code
 COPY ./app ./app
 
-# This ARG will be set by docker-compose to the relative path of fastrtc_voice_assistant
-ARG FASTRTC_VOICE_ASSISTANT_SRC_PATH=../fastrtc_voice_assistant/src
+# Create directories for shared mounts
+RUN mkdir -p /app/shared/src /app/shared/models /app/shared/config
 
-# Set PYTHONPATH to include the backend's app directory and the mounted fastrtc_voice_assistant src
-# The actual fastrtc_voice_assistant_src will be mounted by docker-compose
-ENV PYTHONPATH="/usr/src/app/backend:/usr/src/app/fastrtc_voice_assistant_src:${PYTHONPATH}"
+# Create directories for logs and data with proper permissions
+RUN mkdir -p /app/logs /app/data && \
+    chown -R appuser:appuser /app
 
-# Expose the port the app runs on
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# Expose the port
 EXPOSE 8000
 
-# Define the command to run the application using Uvicorn
-# The --host 0.0.0.0 makes it accessible from outside the container
+# Define the command to run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

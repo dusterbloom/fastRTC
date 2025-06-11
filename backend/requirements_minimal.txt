@@ -5,7 +5,6 @@ cachetools
 numpy
 python-multipart
 websockets
-pydantic-settings 
 
 # Dependencies needed by imported voice assistant code
 aiohttp

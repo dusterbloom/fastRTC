@@ -18,7 +18,7 @@ from app.schemas.ws_schemas import (WSError, WSAuthRequest,
                                             WSTextInput)
 from app.services.assistant_service import AssistantService
 # Import the global instance from main.py
-from app.globals import get_assistant_service
+from app.main import assistant_service_instance
 from fastrtc_voice_assistant.src.core.interfaces import TranscriptionResult
 from fastrtc_voice_assistant.src.core.voice_assistant import VoiceAssistant
 
@@ -29,11 +29,11 @@ def get_assistant_service() -> AssistantService:
     """
     Dependency to get the global instance of AssistantService.
     """
-    if get_assistant_service() is None:
+    if assistant_service_instance is None:
         # This will be caught by FastAPI's dependency injection system
         # if the service isn't available, leading to a connection error.
         raise HTTPException(status_code=503, detail="Assistant service not available.")
-    return get_assistant_service()
+    return assistant_service_instance
 
 @router.websocket("/converse")
 async def websocket_converse_endpoint(

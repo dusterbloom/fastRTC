@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s # By default, scrape targets every 15 seconds.
+
+scrape_configs:
+  - job_name: 'prometheus'
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'backend'
+    static_configs:
+      - targets: ['backend:8000'] # Assumes 'backend' service on port 8000
+
+  - job_name: 'voice-assistant'
+    static_configs:
+      - targets: ['voice-assistant:8080'] # Assumes 'voice-assistant' service on port 8080

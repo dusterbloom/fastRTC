@@ -3,10 +3,10 @@ from typing import Optional
 
 from cachetools import LRUCache
 from fastrtc_voice_assistant.src.core.voice_assistant import VoiceAssistant
-from fastrtc_voice_assistant.src.config.settings import SettingsGlobal as VoiceAssistantSettings
+from fastrtc_voice_assistant.src.config.settings import load_config
 
-from backend.app.core.config import Settings
-from backend.app.schemas.common_schemas import STTResponse, ConverseResponse, SessionResponse
+from app.core.config import Settings
+from app.schemas.common_schemas import STTResponse, ConverseResponse, SessionResponse
 
 
 class AssistantService:
@@ -24,7 +24,7 @@ class AssistantService:
         # Assuming VoiceAssistantSettings can be instantiated directly
         # or has a method to load from its own .env or config files.
         # This might need adjustment based on how VoiceAssistantSettings is designed.
-        self.voice_assistant_global_settings = VoiceAssistantSettings()
+        self.voice_assistant_global_settings = load_config()
 
     async def get_assistant_for_http(
         self, session_id: str, user_id: Optional[str]
