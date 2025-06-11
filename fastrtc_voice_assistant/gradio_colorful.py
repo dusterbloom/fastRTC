@@ -1,94 +1,115 @@
 #!/usr/bin/env python3
 """
-Colorful FastRTC Voice Assistant – FastAPI edition
--------------------------------------------------
-Launch with::
-
-    fastRTC/python -m uvicorn fastrtc_voice_assistant.start:app --reload --port 8000
-
-This file keeps all the original logic (audio > STT > LLM > TTS), but
-wraps the Stream in a FastAPI app so that any WebRTC-capable front-end
-(e.g. Rohan Prichard’s React demo) can talk to it.
+Colorful Gradio3 Voice Assistant
+Enhanced with colorama for better terminal visualization
+Focuses on essential information: user/assistant/memory/language
 """
 
-from __future__ import annotations
-
-# ────────────────────────── STANDARD LIB  ────────────────────────────
-import asyncio
-import os
 import sys
-import threading
 import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, List, Optional, Tuple
-
-# ────────────────────────── THIRD-PARTY  ─────────────────────────────
+import os
 import numpy as np
-from colorama import Back, Fore, Style, init
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastrtc import (ReplyOnPause, Stream, audio_to_bytes, get_tts_model)
-from fastrtc.utils import AdditionalOutputs
+import asyncio
+import threading
+from pathlib import Path
+from fastrtc import (
+    ReplyOnPause,
+    Stream,
+    get_tts_model,
+    AlgoOptions,
+    SileroVadOptions,
+    KokoroTTSOptions,
+    audio_to_bytes,
+)
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple, Any
+import logging
+from collections import deque
 
-# ────────────────────────── APP INTERNALS  ───────────────────────────
-# Make local packages importable
-sys.path.insert(0, str(Path(__file__).parent.resolve()))
-from src.config.audio_config import (  # noqa: E402
+# Colorama for colorful terminal output
+from colorama import init, Fore, Back, Style
+init(autoreset=True)  # Auto-reset colors after each print
+
+# Add src to path for imports
+sys.path.insert(0, 'src')
+
+from src.core.voice_assistant import VoiceAssistant
+from src.core.interfaces import AudioData, TranscriptionResult
+from src.utils.logging import setup_logging, get_logger
+from src.config.settings import DEFAULT_LANGUAGE
+import traceback
+from fastrtc.utils import AdditionalOutputs
+from src.integration.fastrtc_bridge import FastRTCBridge
+
+from src.config.audio_config import (
     AUDIO_SAMPLE_RATE,
     MINIMAL_SILENT_FRAME_DURATION_MS,
     MINIMAL_SILENT_SAMPLES,
     SILENT_AUDIO_CHUNK_ARRAY,
     SILENT_AUDIO_FRAME_TUPLE,
 )
-from src.config.settings import DEFAULT_LANGUAGE, load_config  # noqa: E402
-from src.core.interfaces import AudioData, TranscriptionResult  # noqa: E402
-from src.core.voice_assistant import VoiceAssistant  # noqa: E402
-from src.utils.logging import get_logger, setup_logging  # noqa: E402
+EMPTY_AUDIO_YIELD_OUTPUT = (SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs())
+from src.config.settings import load_config
 
-# ────────────────────────── INITIAL SET-UP  ─────────────────────────
-init(autoreset=True)                # colour logging
+# Set up logging
 setup_logging()
 logger = get_logger(__name__)
 
-# Globals the rest of the file relies on
+# Global instances
 voice_assistant: Optional[VoiceAssistant] = None
 main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 async_worker_thread: Optional[threading.Thread] = None
 
+def print_colorful(message, color=Fore.WHITE, style=Style.NORMAL):
+    """Print colorful messages with timestamp."""
+    timestamp = time.strftime("%H:%M:%S")
+    print(f"{Fore.CYAN}[{timestamp}]{Style.RESET_ALL} {style}{color}{message}{Style.RESET_ALL}")
 
-# Typed alias for the audio chunks we pass around
-EMPTY_AUDIO_YIELD_OUTPUT: Tuple[
-    Tuple[int, np.ndarray], AdditionalOutputs
-] = (SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs())
+def print_user(message):
+    """Print user messages in blue."""
+    print_colorful(f"👤 User: {message}", Fore.BLUE, Style.BRIGHT)
 
-# ────────────────────────── PRINT HELPERS  ──────────────────────────
-def _timestamp() -> str:
-    return time.strftime("%H:%M:%S")
+def print_assistant(message):
+    """Print assistant messages in green."""
+    print_colorful(f"🤖 Assistant: {message}", Fore.GREEN, Style.BRIGHT)
 
+def print_memory(message):
+    """Print memory-related messages in magenta."""
+    print_colorful(f"🧠 Memory: {message}", Fore.MAGENTA, Style.BRIGHT)
 
-def print_colorful(msg: str, color=Fore.WHITE, style=Style.NORMAL) -> None:
-    print(f"{Fore.CYAN}[{_timestamp()}]{Style.RESET_ALL} {style}{color}{msg}{Style.RESET_ALL}")
+def print_language(message):
+    """Print language-related messages in yellow."""
+    print_colorful(f"🌍 Language: {message}", Fore.YELLOW, Style.BRIGHT)
 
+def print_tts(message):
+    """Print TTS-related messages in cyan."""
+    print_colorful(f"🎤 TTS: {message}", Fore.CYAN, Style.BRIGHT)
 
-def print_user(m):        print_colorful(f" User: {m}", Fore.BLUE, Style.BRIGHT)
-def print_assistant(m):   print_colorful(f" Assistant: {m}", Fore.GREEN, Style.BRIGHT)
-def print_memory(m):      print_colorful(f" Memory: {m}", Fore.MAGENTA, Style.BRIGHT)
-def print_language(m):    print_colorful(f" Language: {m}", Fore.YELLOW, Style.BRIGHT)
-def print_tts(m):         print_colorful(f" TTS: {m}", Fore.CYAN, Style.BRIGHT)
-def print_error(m):       print_colorful(f"❌ Error: {m}", Fore.RED, Style.BRIGHT)
-def print_success(m):     print_colorful(f"✅ Success: {m}", Fore.GREEN, Style.BRIGHT)
-def print_info(m):        print_colorful(f"ℹ️ Info: {m}", Fore.WHITE, Style.NORMAL)
-def print_timing(m):      print_colorful(f"⏱️ Timing: {m}", Fore.LIGHTBLUE_EX, Style.NORMAL)
+def print_error(message):
+    """Print error messages in red."""
+    print_colorful(f"❌ Error: {message}", Fore.RED, Style.BRIGHT)
 
-# ────────────────────────── AUDIO CALLBACK  ─────────────────────────
+def print_success(message):
+    """Print success messages in green."""
+    print_colorful(f"✅ Success: {message}", Fore.GREEN, Style.BRIGHT)
+
+def print_info(message):
+    """Print info messages in white."""
+    print_colorful(f"ℹ️  Info: {message}", Fore.WHITE, Style.NORMAL)
+
+def print_timing(message):
+    """Print timing messages in light blue."""
+    print_colorful(f"⏱️  Timing: {message}", Fore.LIGHTBLUE_EX, Style.NORMAL)
+
 def voice_assistant_callback_rt(audio_data_tuple: tuple):
-    """
-    The core callback used by fastrtc.Stream.
-    Unchanged from the original file – shortened here for brevity
-    (all the STT / LLM / TTS logic is identical).
-    """
+    """Colorful callback with essential information only."""
+    global voice_assistant
+
+    if not voice_assistant:
+        print_error("Voice assistant not initialized!")
+        yield EMPTY_AUDIO_YIELD_OUTPUT
+        return
+
     try:
         # Process audio (simplified from original)
         if isinstance(audio_data_tuple, tuple) and len(audio_data_tuple) == 2:
@@ -267,99 +288,110 @@ def voice_assistant_callback_rt(audio_data_tuple: tuple):
         print_error(f"Critical error in callback: {e}")
         yield EMPTY_AUDIO_YIELD_OUTPUT
 
-
-# ────────────────────────── ASYNC ENVIRONMENT  ───────────────────────
-def setup_async_environment() -> None:
-    """
-    Starts an event-loop in a background thread and initialises the
-    VoiceAssistant instance so it’s ready when WebRTC traffic arrives.
-    """
+def setup_async_environment():
+    """Setup async environment with colorful output."""
     global main_event_loop, voice_assistant, async_worker_thread
-
-    print_info("Creating VoiceAssistant instance …")
+    
+    print_info("Creating VoiceAssistant instance...")
     voice_assistant = VoiceAssistant(config=load_config())
 
-    def _run_loop() -> None:
-        global main_event_loop
+    def run_async_loop_in_thread():
+        global main_event_loop, voice_assistant
         main_event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(main_event_loop)
-
+        
         if voice_assistant:
-            print_info("Initialising async components …")
+            print_info("Initializing async components...")
             main_event_loop.run_until_complete(voice_assistant.initialize_async())
-            print_success("VoiceAssistant async components ready")
+            
+            # Check memory manager initialization
+            if hasattr(voice_assistant, 'memory_manager') and voice_assistant.memory_manager:
+                print_memory("Memory manager initialized successfully")
+            else:
+                print_memory("Memory manager not available")
+        else:
+            print_error("Voice assistant instance is None in async thread")
+            return
 
-        main_event_loop.run_forever()
+        try:
+            main_event_loop.run_forever()
+        except KeyboardInterrupt:
+            print_info("Async loop interrupted")
+        finally:
+            if voice_assistant and main_event_loop and not main_event_loop.is_closed():
+                print_info("Cleaning up assistant resources...")
+                main_event_loop.run_until_complete(voice_assistant.cleanup_async())
+            if main_event_loop and not main_event_loop.is_closed():
+                 main_event_loop.close()
+            print_info("Async event loop closed")
 
-    async_worker_thread = threading.Thread(
-        target=_run_loop, daemon=True, name="AsyncWorkerThread"
-    )
+    async_worker_thread = threading.Thread(target=run_async_loop_in_thread, daemon=True, name="AsyncWorkerThread")
     async_worker_thread.start()
 
-    # Spin-wait until the loop is up
+    # Wait for initialization
     for _ in range(100):
-        if main_event_loop and main_event_loop.is_running():
+        if main_event_loop and main_event_loop.is_running() and voice_assistant:
+            print_success("Async environment ready")
             return
         time.sleep(0.1)
     print_error("Async environment setup timeout")
 
-
-def run_coro_from_sync_thread_with_timeout(coro, timeout: float = 4.0) -> Any:
-    """
-    Utility helper needed by the callback – unchanged.
-    """
+def run_coro_from_sync_thread_with_timeout(coro, timeout: float = 4.0) -> any:
+    """Run coroutine with timeout."""
     global main_event_loop
-    if not (main_event_loop and main_event_loop.is_running()):
-        raise RuntimeError("Event loop not available")
+    if main_event_loop and main_event_loop.is_running():
+        import asyncio
+        import time
+        
+        start_time = time.monotonic()
+        
+        future = asyncio.run_coroutine_threadsafe(
+            asyncio.wait_for(coro, timeout=timeout),
+            main_event_loop
+        )
+        try:
+            result = future.result(timeout=timeout + 1.0)
+            elapsed = time.monotonic() - start_time
+            return result
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - start_time
+            print_error(f"Async task timed out after {timeout}s")
+            raise TimeoutError(f"Operation timed out after {timeout}s")
+        except Exception as e:
+            elapsed = time.monotonic() - start_time
+            print_error(f"Async task error: {e}")
+            return "I encountered an error processing your request."
+    else:
+        print_error("Event loop not available")
+        return "My processing system is not ready."
 
-    future = asyncio.run_coroutine_threadsafe(
-        asyncio.wait_for(coro, timeout=timeout), main_event_loop
-    )
-    return future.result(timeout=timeout + 1)
+def main():
+    """Colorful main function."""
+    print(f"{Fore.CYAN}{Style.BRIGHT}🎨 Colorful FastRTC Voice Assistant{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{'=' * 50}{Style.RESET_ALL}")
+    
+    setup_async_environment()
 
+    bridge = FastRTCBridge()
+    bridge.create_stream(voice_assistant_callback_rt)
+    
+    try:
+        print(f"{Fore.GREEN}{Style.BRIGHT}💡 Test the assistant with:{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}   • 'My name is [Your Name]'{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}   • 'What is my name?'{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}   • 'I like [something]'{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}   • 'What do you know about me?'{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}   • 'Tell me about myself'{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{'=' * 50}{Style.RESET_ALL}")
+        
+        bridge.launch_stream()
+        
+    except KeyboardInterrupt:
+        print_info("Shutting down...")
+    except Exception as e:
+        print_error(f"Launch error: {e}")
+    finally:
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}👋 Session ended{Style.RESET_ALL}")
 
-# ────────────────────────── BUILD THE STREAM  ────────────────────────
-setup_async_environment()  # initialise before we build the Stream
-
-assistant_stream = Stream(
-    ReplyOnPause(voice_assistant_callback_rt),
-    modality="audio",
-    mode="send-receive",
-)
-
-# ────────────────────────── FASTAPI APP  ────────────────────────────
-app = FastAPI(title="FastRTC Voice Assistant", version="1.0.0")
-
-# CORS so the React/Vite front-end can hit the endpoints
-origins = [
-    "http://localhost:5173",               # Original Vite dev-server port
-    "http://localhost:3001",               # Next.js dev-server port from screenshot
-    "http://127.0.0.1:3001",             # Explicit IP for Next.js dev-server
-    os.getenv("FRONTEND_URL", ""),         # prod domain, if set
-]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o for o in origins if o],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Mount FastRTC routes → /assistant/webrtc/offer  &  /assistant/ws
-assistant_stream.mount(app, path="/assistant")
-
-# Optional: serve a built SPA from /frontend/dist
-_frontend_dist = Path(__file__).parent / "frontend" / "dist"
-if _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="spa")
-
-# ────────────────────────── ENTRY POINT  ────────────────────────────
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "fastrtc_voice_assistant.start:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=True,
-    )
+    main()

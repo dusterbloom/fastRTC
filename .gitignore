@@ -3,3 +3,4 @@ archive/
 __pycache__/
 .vscode/
 qdrant_storage/
+chroma_db/
