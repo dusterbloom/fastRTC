@@ -11,6 +11,8 @@ import os
 import numpy as np
 import asyncio
 import threading
+import websockets # Added
+import json # Added
 from pathlib import Path
 from fastrtc import (
     ReplyOnPause,
@@ -22,7 +24,7 @@ from fastrtc import (
     audio_to_bytes,
 )
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, AsyncGenerator
 import logging
 from collections import deque
 
@@ -31,34 +33,34 @@ from colorama import init, Fore, Back, Style
 init(autoreset=True)  # Auto-reset colors after each print
 
 # Add src to path for imports
-sys.path.insert(0, 'src')
+# sys.path.insert(0, 'src') # No longer needed for VoiceAssistant direct import
 
-from src.core.voice_assistant import VoiceAssistant
-from src.core.interfaces import AudioData, TranscriptionResult
+# from src.core.voice_assistant import VoiceAssistant # Removed
+# from src.core.interfaces import AudioData, TranscriptionResult # Removed
 from src.utils.logging import setup_logging, get_logger
-from src.config.settings import DEFAULT_LANGUAGE
+# from src.config.settings import DEFAULT_LANGUAGE # Removed, backend handles language
 import traceback
 from fastrtc.utils import AdditionalOutputs
 from src.integration.fastrtc_bridge import FastRTCBridge
 
 from src.config.audio_config import (
-    AUDIO_SAMPLE_RATE,
-    MINIMAL_SILENT_FRAME_DURATION_MS,
-    MINIMAL_SILENT_SAMPLES,
+    # AUDIO_SAMPLE_RATE, # May come from backend or be fixed for TTS
+    MINIMAL_SILENT_FRAME_DURATION_MS, # May not be relevant client side
+    MINIMAL_SILENT_SAMPLES, # May not be relevant client side
     SILENT_AUDIO_CHUNK_ARRAY,
     SILENT_AUDIO_FRAME_TUPLE,
 )
 EMPTY_AUDIO_YIELD_OUTPUT = (SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs())
-from src.config.settings import load_config
+# from src.config.settings import load_config # Removed
 
 # Set up logging
 setup_logging()
 logger = get_logger(__name__)
 
-# Global instances
-voice_assistant: Optional[VoiceAssistant] = None
-main_event_loop: Optional[asyncio.AbstractEventLoop] = None
-async_worker_thread: Optional[threading.Thread] = None
+# Global instances (Removed)
+# voice_assistant: Optional[VoiceAssistant] = None
+# main_event_loop: Optional[asyncio.AbstractEventLoop] = None
+# async_worker_thread: Optional[threading.Thread] = None
 
 def print_colorful(message, color=Fore.WHITE, style=Style.NORMAL):
     """Print colorful messages with timestamp."""
@@ -101,287 +103,236 @@ def print_timing(message):
     """Print timing messages in light blue."""
     print_colorful(f"⏱️  Timing: {message}", Fore.LIGHTBLUE_EX, Style.NORMAL)
 
-def voice_assistant_callback_rt(audio_data_tuple: tuple):
-    """Colorful callback with essential information only."""
-    global voice_assistant
+def voice_assistant_callback_rt(audio_data_tuple: tuple) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
+    """Callback to handle audio data, connect to WebSocket backend, and stream TTS."""
+    
+    backend_ws_url = os.environ.get("BACKEND_WS_URL", "ws://localhost:8000/ws/v1/voice_chat")
+    # It's better to require API key to be set, or handle its absence more explicitly
+    backend_api_key = os.environ.get("BACKEND_API_KEY")
 
-    if not voice_assistant:
-        print_error("Voice assistant not initialized!")
+    if not backend_ws_url:
+        print_error("BACKEND_WS_URL environment variable not set.")
+        yield EMPTY_AUDIO_YIELD_OUTPUT
+        return
+    if not backend_api_key:
+        print_error("BACKEND_API_KEY environment variable not set.")
+        # Potentially allow operation without API key if backend supports it,
+        # but for now, let's assume it's required.
         yield EMPTY_AUDIO_YIELD_OUTPUT
         return
 
-    try:
-        # Process audio (simplified from original)
-        if isinstance(audio_data_tuple, tuple) and len(audio_data_tuple) == 2:
-            sample_rate, raw_audio_array = audio_data_tuple
-            
-            if isinstance(raw_audio_array, np.ndarray) and len(raw_audio_array.shape) > 1:
-                if raw_audio_array.shape[0] == 1:
-                    audio_array = raw_audio_array[0]
-                elif raw_audio_array.shape[1] == 1:
-                    audio_array = raw_audio_array[:, 0]
-                elif raw_audio_array.shape[1] > 1:
-                    audio_array = np.mean(raw_audio_array, axis=1)
-                else:
-                    audio_array = raw_audio_array.flatten()
-            else:
-                audio_array = raw_audio_array if isinstance(raw_audio_array, np.ndarray) else np.array(raw_audio_array, dtype=np.float32)
-            
-            if isinstance(audio_array, np.ndarray):
-                if audio_array.dtype == np.int16:
-                    audio_array = audio_array.astype(np.float32) / 32768.0
-                else:
-                    audio_array = audio_array.astype(np.float32)
+    # Process incoming audio_data_tuple
+    if isinstance(audio_data_tuple, tuple) and len(audio_data_tuple) == 2:
+        sample_rate, raw_audio_array = audio_data_tuple
+        if isinstance(raw_audio_array, np.ndarray) and len(raw_audio_array.shape) > 1:
+            if raw_audio_array.shape[0] == 1: audio_array = raw_audio_array[0]
+            elif raw_audio_array.shape[1] == 1: audio_array = raw_audio_array[:, 0]
+            elif raw_audio_array.shape[1] > 1: audio_array = np.mean(raw_audio_array, axis=1) # Mono conversion
+            else: audio_array = raw_audio_array.flatten()
         else:
-            audio_array = np.array([], dtype=np.float32)
-            sample_rate = 16000
-
-        if audio_array.size == 0:
-            yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
-            return
-
-        # Language names mapping
-        lang_names = {
-            'a': 'American English', 'b': 'British English', 'i': 'Italian', 
-            'e': 'Spanish', 'f': 'French', 'p': 'Portuguese', 
-            'j': 'Japanese', 'z': 'Chinese', 'h': 'Hindi'
-        }
-
-        # STT processing
-        user_text = ""
-        detected_language = DEFAULT_LANGUAGE
+            audio_array = raw_audio_array if isinstance(raw_audio_array, np.ndarray) else np.array(raw_audio_array, dtype=np.float32)
         
-        if audio_array.size > 0:
-            print_info(f"Processing audio ({len(audio_array) / sample_rate:.1f}s)")
-            
-            try:
-                transcription_result = run_coro_from_sync_thread_with_timeout(
-                    voice_assistant.stt_engine.transcribe_with_sample_rate(audio_array, sample_rate),
-                    timeout=8.0
-                )
-                
-                if hasattr(transcription_result, 'text'):
-                    user_text = transcription_result.text.strip()
-                    detected_language = voice_assistant.detect_language_from_text(user_text)
-                else:
-                    user_text = str(transcription_result).strip()
-                    detected_language = DEFAULT_LANGUAGE
-                
-                # Language detection
-                if detected_language != voice_assistant.current_language:
-                    voice_assistant.current_language = detected_language
-                    lang_name = lang_names.get(detected_language, 'Unknown')
-                    print_language(f"Switched to {lang_name} ({detected_language})")
-                
-            except Exception as e:
-                print_error(f"STT failed: {e}")
-                user_text = ""
-                detected_language = DEFAULT_LANGUAGE
-
-        if not user_text.strip():
-            yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
-            return
-
-        print_user(user_text)
-
-        # LLM response with memory tracking
-        start_turn_time = time.monotonic()
-        
-        try:
-            # Check memory state before LLM call
-            memory_context_before = None
-            if hasattr(voice_assistant, 'memory_manager') and voice_assistant.memory_manager:
-                try:
-                    memory_context_before = run_coro_from_sync_thread_with_timeout(
-                        voice_assistant.memory_manager.get_conversation_context(),
-                        timeout=20.0
-                    )
-                    if memory_context_before:
-                        print_memory(f"Context loaded ({len(str(memory_context_before))} chars)")
-                except Exception as e:
-                    print_memory(f"Context load failed: {e}")
-            else:
-                print_memory("No memory manager available")
-            
-            # Make LLM call
-            assistant_response_text = run_coro_from_sync_thread_with_timeout(
-                voice_assistant.get_llm_response_smart(user_text),
-                timeout=10.0
-            )
-            
-            turn_processing_time = time.monotonic() - start_turn_time
-            
-            # Check memory state after LLM call
-            memory_context_after = None
-            if hasattr(voice_assistant, 'memory_manager') and voice_assistant.memory_manager:
-                try:
-                    memory_context_after = run_coro_from_sync_thread_with_timeout(
-                        voice_assistant.memory_manager.get_conversation_context(),
-                        timeout=4.0
-                    )
-                    if memory_context_before and memory_context_after:
-                        if str(memory_context_before) != str(memory_context_after):
-                            print_memory("Context updated with new conversation")
-                        else:
-                            print_memory("Context unchanged")
-                except Exception as e:
-                    print_memory(f"Context check failed: {e}")
-            
-        except TimeoutError:
-            assistant_response_text = "Let me think about that and get back to you quickly."
-            print_error("LLM request timed out")
-        except Exception as e:
-            assistant_response_text = "I encountered an error processing your request."
-            print_error(f"LLM error: {e}")
-        
-        turn_processing_time = time.monotonic() - start_turn_time
-        print_assistant(assistant_response_text)
-        print_timing(f"Response generated in {turn_processing_time:.2f}s")
-
-        # TTS processing
-        additional_outputs = AdditionalOutputs()
-        
-        # Language conversion for TTS
-        if len(voice_assistant.current_language) > 1:
-            kokoro_language = voice_assistant.convert_to_kokoro_language(voice_assistant.current_language)
-            voice_assistant.current_language = kokoro_language
-            print_language(f"Converted to Kokoro format: {kokoro_language}")
-        
-        tts_voices_to_try = voice_assistant.get_voices_for_language(voice_assistant.current_language)
-        tts_voices_to_try.append(None)
-        
-        print_tts(f"Using language '{voice_assistant.current_language}' with {len(tts_voices_to_try)} voice options")
-        
-        tts_success = False
-        for voice_id in tts_voices_to_try:
-            try:
-                print_tts(f"Trying voice: {voice_id or 'default'}")
-                
-                chunk_count = 0
-                total_samples = 0
-                
-                for current_sr, current_chunk_array in voice_assistant.stream_tts_synthesis(
-                    assistant_response_text, voice_id, voice_assistant.current_language
-                ):
-                    if isinstance(current_chunk_array, np.ndarray) and current_chunk_array.size > 0:
-                        chunk_count += 1
-                        total_samples += current_chunk_array.size
-                        chunk_size = min(1024, current_chunk_array.size)
-                        for i in range(0, current_chunk_array.size, chunk_size):
-                            mini_chunk = current_chunk_array[i:i+chunk_size]
-                            if mini_chunk.size > 0:
-                                yield (current_sr, mini_chunk), additional_outputs
-                
-                tts_success = True
-                print_success(f"TTS completed with voice '{voice_id or 'default'}' ({chunk_count} chunks, {total_samples} samples)")
-                break
-                    
-            except Exception as e:
-                print_error(f"TTS failed with voice '{voice_id}': {e}")
-                continue
-                
-        if not tts_success:
-            print_error("All TTS attempts failed")
-            yield SILENT_AUDIO_FRAME_TUPLE, additional_outputs
-
-    except Exception as e:
-        print_error(f"Critical error in callback: {e}")
-        yield EMPTY_AUDIO_YIELD_OUTPUT
-
-def setup_async_environment():
-    """Setup async environment with colorful output."""
-    global main_event_loop, voice_assistant, async_worker_thread
-    
-    print_info("Creating VoiceAssistant instance...")
-    voice_assistant = VoiceAssistant(config=load_config())
-
-    def run_async_loop_in_thread():
-        global main_event_loop, voice_assistant
-        main_event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(main_event_loop)
-        
-        if voice_assistant:
-            print_info("Initializing async components...")
-            main_event_loop.run_until_complete(voice_assistant.initialize_async())
-            
-            # Check memory manager initialization
-            if hasattr(voice_assistant, 'memory_manager') and voice_assistant.memory_manager:
-                print_memory("Memory manager initialized successfully")
-            else:
-                print_memory("Memory manager not available")
-        else:
-            print_error("Voice assistant instance is None in async thread")
-            return
-
-        try:
-            main_event_loop.run_forever()
-        except KeyboardInterrupt:
-            print_info("Async loop interrupted")
-        finally:
-            if voice_assistant and main_event_loop and not main_event_loop.is_closed():
-                print_info("Cleaning up assistant resources...")
-                main_event_loop.run_until_complete(voice_assistant.cleanup_async())
-            if main_event_loop and not main_event_loop.is_closed():
-                 main_event_loop.close()
-            print_info("Async event loop closed")
-
-    async_worker_thread = threading.Thread(target=run_async_loop_in_thread, daemon=True, name="AsyncWorkerThread")
-    async_worker_thread.start()
-
-    # Wait for initialization
-    for _ in range(100):
-        if main_event_loop and main_event_loop.is_running() and voice_assistant:
-            print_success("Async environment ready")
-            return
-        time.sleep(0.1)
-    print_error("Async environment setup timeout")
-
-def run_coro_from_sync_thread_with_timeout(coro, timeout: float = 4.0) -> any:
-    """Run coroutine with timeout."""
-    global main_event_loop
-    if main_event_loop and main_event_loop.is_running():
-        import asyncio
-        import time
-        
-        start_time = time.monotonic()
-        
-        future = asyncio.run_coroutine_threadsafe(
-            asyncio.wait_for(coro, timeout=timeout),
-            main_event_loop
-        )
-        try:
-            result = future.result(timeout=timeout + 1.0)
-            elapsed = time.monotonic() - start_time
-            return result
-        except asyncio.TimeoutError:
-            elapsed = time.monotonic() - start_time
-            print_error(f"Async task timed out after {timeout}s")
-            raise TimeoutError(f"Operation timed out after {timeout}s")
-        except Exception as e:
-            elapsed = time.monotonic() - start_time
-            print_error(f"Async task error: {e}")
-            return "I encountered an error processing your request."
+        if isinstance(audio_array, np.ndarray):
+            if audio_array.dtype == np.int16: # Normalize if int16
+                audio_array = audio_array.astype(np.float32) / 32768.0
+            else: # Ensure float32
+                audio_array = audio_array.astype(np.float32)
     else:
-        print_error("Event loop not available")
-        return "My processing system is not ready."
+        audio_array = np.array([], dtype=np.float32)
+        sample_rate = 16000 # Default if no audio comes, backend should confirm actual SR
+
+    if audio_array.size == 0:
+        # This case might be hit if FastRTC sends empty data even before user speaks.
+        # Depending on desired behavior, we might not want to establish a WS connection yet.
+        # For now, we yield silent frame and return, avoiding WS connection for empty input.
+        # print_info("No audio input received, yielding silent frame.")
+        yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
+        return
+    
+    print_info(f"Received audio: {len(audio_array)/sample_rate:.2f}s, SR: {sample_rate}")
+
+    async def _manage_websocket_communication(
+        audio_data_np: np.ndarray,
+        input_sample_rate: int
+    ) -> List[Tuple[int, np.ndarray]]:
+        collected_tts_chunks = []
+        # Default TTS sample rate, will be updated by `session_started` message from backend.
+        # Common rates are 16000, 22050, 24000, 44100, 48000.
+        # Backend should ideally inform the client of the TTS output sample rate.
+        tts_sample_rate_from_backend = 16000 # Fallback, e.g. if not in session_started
+
+        try:
+            print_info(f"Connecting to WebSocket: {backend_ws_url}")
+            async with websockets.connect(backend_ws_url) as websocket:
+                print_success("WebSocket connection established.")
+                
+                # 1. Send Authentication
+                auth_payload = {
+                    "type": "auth",
+                    "api_key": backend_api_key,
+                    "user_id": "gradio_client_user_01", # Consider making this unique or configurable
+                    "session_id": None, # Let backend manage session creation
+                    "audio_format": "float32",
+                    "sample_rate": input_sample_rate
+                }
+                await websocket.send(json.dumps(auth_payload))
+                print_info(f"Sent auth: user_id='{auth_payload['user_id']}', sample_rate={auth_payload['sample_rate']}")
+
+                # 2. Receive Session Started Confirmation
+                response_str = await websocket.recv()
+                if isinstance(response_str, str):
+                    response_data = json.loads(response_str)
+                    print_info(f"Received from WS: {response_data}")
+                    if response_data.get("type") == "session_started":
+                        session_id = response_data.get("session_id")
+                        # Update TTS sample rate if provided by backend
+                        tts_sample_rate_from_backend = response_data.get("tts_sample_rate", tts_sample_rate_from_backend)
+                        print_success(f"Session started: ID={session_id}, TTS SR: {tts_sample_rate_from_backend}")
+                    elif response_data.get("type") == "error":
+                        print_error(f"Authentication/Session error from backend: {response_data.get('message')}")
+                        return [] # Stop processing for this turn
+                    else:
+                        print_error(f"Unexpected JSON response after auth: {response_data}")
+                        return []
+                else: # Should be a JSON string
+                    print_error(f"Unexpected response type after auth (expected str, got {type(response_str)}): {response_str[:100]}")
+                    return []
+
+                # 3. Send Initial Audio
+                if audio_data_np.size > 0:
+                    # Ensure audio is float32 before sending
+                    audio_bytes_to_send = audio_data_np.astype(np.float32).tobytes()
+                    await websocket.send(audio_bytes_to_send)
+                    print_info(f"Sent {len(audio_bytes_to_send)} bytes of audio data.")
+                
+                await websocket.send(json.dumps({"type": "audio_complete"}))
+                print_info("Sent audio_complete.")
+
+                # 4. Receive and Process Backend Messages
+                while True:
+                    message = await websocket.recv()
+                    
+                    if isinstance(message, str): # JSON message
+                        data = json.loads(message)
+                        # print_info(f"Received JSON from WS: {data}") # Can be verbose
+                        msg_type = data.get("type")
+
+                        if msg_type == "stt_final":
+                            user_text = data.get("text", "")
+                            print_user(f"{user_text}")
+                        elif msg_type == "llm_response":
+                            assistant_response_text = data.get("text", "")
+                            print_assistant(f"{assistant_response_text}")
+                        elif msg_type == "tts_complete":
+                            print_success("TTS complete signal received from backend.")
+                            break # End of this interaction's TTS
+                        elif msg_type == "error":
+                            print_error(f"Backend error during interaction: {data.get('message')}")
+                            # Depending on severity, might break or just log
+                        elif msg_type == "pong": # Handle keepalive if backend sends pings
+                            # print_info("Received pong from backend.")
+                            pass
+                        else:
+                            print_info(f"Received unhandled JSON message type: {msg_type}, data: {data}")
+
+                    elif isinstance(message, bytes): # TTS audio chunk
+                        audio_chunk_np = np.frombuffer(message, dtype=np.float32)
+                        if audio_chunk_np.size > 0:
+                            # print_tts(f"Received TTS audio chunk: {len(audio_chunk_np)} samples at {tts_sample_rate_from_backend} Hz")
+                            collected_tts_chunks.append((tts_sample_rate_from_backend, audio_chunk_np))
+                        # else:
+                            # print_tts("Received empty TTS audio chunk (ignoring).")
+                    else:
+                        print_error(f"Received unexpected message type: {type(message)}")
+            
+            print_info("WebSocket connection closed by server or tts_complete.")
+
+        except websockets.exceptions.ConnectionClosedOK:
+            print_info("WebSocket connection closed gracefully (OK).")
+        except websockets.exceptions.ConnectionClosedError as e:
+            print_error(f"WebSocket connection closed with error: {e.code} {e.reason}")
+        except ConnectionRefusedError:
+            print_error(f"WebSocket connection refused. Is the backend server running at {backend_ws_url}?")
+        except asyncio.TimeoutError:
+            print_error("WebSocket operation timed out.")
+        except Exception as e:
+            print_error(f"Error in WebSocket communication: {type(e).__name__}: {e}")
+            traceback.print_exc()
+        
+        return collected_tts_chunks
+
+    # Running the async helper in the synchronous callback
+    # This requires its own event loop as FastRTCBridge runs this callback in a separate thread
+    loop = None
+    try:
+        # Get or create a new event loop for this thread if one doesn't exist or is closed
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError: # No current event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        tts_chunks_to_yield = loop.run_until_complete(
+            _manage_websocket_communication(audio_array, sample_rate)
+        )
+        
+        if tts_chunks_to_yield:
+            # print_success(f"Collected {len(tts_chunks_to_yield)} TTS chunks to yield.")
+            num_yielded = 0
+            for chunk_sr, chunk_data in tts_chunks_to_yield:
+                if chunk_data.size > 0:
+                    yield (chunk_sr, chunk_data), AdditionalOutputs()
+                    num_yielded +=1
+            if num_yielded == 0: # All chunks were empty
+                print_info("All collected TTS chunks were empty, yielding silent frame.")
+                yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
+
+        else: # No chunks collected (e.g., error during WS, or backend sent no audio)
+            print_info("No TTS chunks received or an error occurred, yielding silent frame.")
+            yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
+            
+    except Exception as e:
+        print_error(f"Critical error in voice_assistant_callback_rt: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        yield EMPTY_AUDIO_YIELD_OUTPUT # Fallback
+    # finally:
+        # The loop management here can be tricky. If FastRTC calls this callback
+        # repeatedly in the same thread, closing the loop might be problematic.
+        # For now, let's not close it here, assuming the thread might reuse it or
+        # that FastRTC manages thread lifecycle appropriately.
+        # If issues arise, this might need revisiting.
+        # if loop and not loop.is_closed():
+        #     loop.close()
+        #     print_info("Asyncio event loop for callback closed.")
+
+
+# def setup_async_environment(): # Removed as per instructions
+#     pass
+
+# def run_coro_from_sync_thread_with_timeout(coro, timeout: float = 4.0) -> any: # Removed as per instructions
+#     pass
 
 def main():
     """Colorful main function."""
-    print(f"{Fore.CYAN}{Style.BRIGHT}🎨 Colorful FastRTC Voice Assistant{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{Style.BRIGHT}🎨 Colorful FastRTC Voice Assistant (WebSocket Mode){Style.RESET_ALL}")
     print(f"{Fore.YELLOW}{'=' * 50}{Style.RESET_ALL}")
     
-    setup_async_environment()
+    # setup_async_environment() # Call removed
 
     bridge = FastRTCBridge()
+    # The callback's type signature is now an AsyncGenerator,
+    # but FastRTCBridge expects a regular generator.
+    # The way voice_assistant_callback_rt is structured (running an event loop internally
+    # and yielding) should still be compatible with FastRTCBridge's expectation
+    # of a synchronous generator.
     bridge.create_stream(voice_assistant_callback_rt)
     
     try:
-        print(f"{Fore.GREEN}{Style.BRIGHT}💡 Test the assistant with:{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}   • 'My name is [Your Name]'{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}   • 'What is my name?'{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}   • 'I like [something]'{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}   • 'What do you know about me?'{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}   • 'Tell me about myself'{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{Style.BRIGHT}🚀 Assistant (WebSocket Mode) starting... Ensure backend is running.{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}   Make sure BACKEND_WS_URL and BACKEND_API_KEY environment variables are set.{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{'=' * 50}{Style.RESET_ALL}")
         
         bridge.launch_stream()
@@ -389,7 +340,8 @@ def main():
     except KeyboardInterrupt:
         print_info("Shutting down...")
     except Exception as e:
-        print_error(f"Launch error: {e}")
+        print_error(f"Launch error: {type(e).__name__}: {e}")
+        traceback.print_exc()
     finally:
         print(f"\n{Fore.CYAN}{Style.BRIGHT}👋 Session ended{Style.RESET_ALL}")
 

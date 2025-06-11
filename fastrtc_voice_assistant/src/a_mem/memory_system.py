@@ -111,29 +111,38 @@ class AgenticMemorySystem:
     - Hybrid search capabilities
     """
     
-    def __init__(self, 
+    def __init__(self,
+                 user_id: str,
                  model_name: str = 'all-MiniLM-L6-v2',
                  llm_backend: str = "ollama",
                  llm_model: str = "llama3.2:3b",
                  evo_threshold: int = 10,
-                 api_key: Optional[str] = None):  
+                 api_key: Optional[str] = None,
+                 persist_directory_base: str = "./chroma_db"):
         """Initialize the memory system.
         
         Args:
+            user_id: Unique identifier for the user.
             model_name: Name of the sentence transformer model
             llm_backend: LLM backend to use (openai/ollama)
             llm_model: Name of the LLM model
             evo_threshold: Number of memories before triggering evolution
             api_key: API key for the LLM service
+            persist_directory_base: Base directory for ChromaDB persistence.
         """
         self.memories = {}
         self.model_name = model_name
+        self.user_id = user_id
+
+        user_specific_collection_name = f"memories_{self.user_id}"
+        user_specific_persist_directory = os.path.join(persist_directory_base, f"user_{self.user_id}")
+        # os.makedirs(user_specific_persist_directory, exist_ok=True) # ChromaRetriever handles dir creation
         
         # Create retriever with persistent storage
         self.retriever = ChromaRetriever(
-            collection_name="memories",
+            collection_name=user_specific_collection_name,
             model_name=self.model_name,
-            persist_directory="./chroma_db"  # This will persist!
+            persist_directory=user_specific_persist_directory
         )
         
         # Load existing memories from ChromaDB into self.memories

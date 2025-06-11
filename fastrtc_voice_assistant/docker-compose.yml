@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/usr/src/app/fastrtc_voice_assistant_src:ro
+      - ../backend/app:/usr/src/app/backend/app:rw
+    env_file: ./.env.development
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - default
+    restart: unless-stopped
+
   voice-assistant:
     build: .
     ports:
@@ -18,9 +33,12 @@ services:
       - CHROMA_DB_PATH=/app/chroma_db
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/0
+      - BACKEND_WS_URL=ws://backend:8000/ws/converse
+      - BACKEND_API_KEY=${API_KEY}
     depends_on:
       - redis
       - qdrant
+      - backend
     restart: unless-stopped
     
   # Redis for caching and rate limiting

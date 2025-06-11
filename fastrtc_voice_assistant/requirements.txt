@@ -16,6 +16,7 @@ nltk
 # HTTP and async
 aiohttp
 
+websockets
 # Vector database
 qdrant-client
 transformers>=4.36.2

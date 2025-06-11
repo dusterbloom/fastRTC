@@ -35,9 +35,13 @@ class AMemMemoryManager(MemoryManager):
     preference tracking, and smart memory storage decisions.
     """
     
-    def __init__(self, user_id: str, amem_model: str = 'all-MiniLM-L6-v2', 
-                 llm_backend: str = "ollama", llm_model: str = "llama3.2:3b",
-                 evo_threshold: int = 50):
+    def __init__(self, user_id: str,
+                 amem_model: str = 'all-MiniLM-L6-v2',
+                 llm_backend: str = "ollama",
+                 llm_model: str = "llama3.2:3b",
+                 evo_threshold: int = 50,
+                 persist_directory_base: str = "./chroma_db_amem",
+                 api_key: Optional[str] = None):
         """Initialize the A-MEM memory manager.
         
         Args:
@@ -46,6 +50,8 @@ class AMemMemoryManager(MemoryManager):
             llm_backend: LLM backend for A-MEM ("ollama" or "lm_studio")
             llm_model: LLM model name for A-MEM
             evo_threshold: Threshold for triggering memory evolution
+            persist_directory_base: Base directory for ChromaDB persistence for A-MEM.
+            api_key: Optional API key for the LLM service used by A-MEM.
             
         Raises:
             MemoryError: If A-MEM system initialization fails
@@ -56,9 +62,9 @@ class AMemMemoryManager(MemoryManager):
         self.user_id = user_id
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="amem_exec")
         self.memory_cache = {
-            'user_name': None, 
-            'preferences': {}, 
-            'facts': {}, 
+            'user_name': None,
+            'preferences': {},
+            'facts': {},
             'last_updated': None
         }
         self.memory_queue = asyncio.Queue()
@@ -69,10 +75,13 @@ class AMemMemoryManager(MemoryManager):
         # Initialize A-MEM system
         try:
             self.amem_system = AgenticMemorySystem(
+                user_id=self.user_id,
                 model_name=amem_model,
                 llm_backend=llm_backend,
                 llm_model=llm_model,
-                evo_threshold=evo_threshold
+                evo_threshold=evo_threshold,
+                api_key=api_key,
+                persist_directory_base=persist_directory_base
             )
             logger.info("🧠 A-MEM system initialized successfully")
         except Exception as e:

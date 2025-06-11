@@ -7,6 +7,7 @@ Integrates all components from previous phases using dependency injection.
 
 import os
 import hashlib
+import uuid
 
 import numpy as np
 import aiohttp
@@ -23,14 +24,14 @@ from ..audio import (
 )
 from ..memory import AMemMemoryManager, ResponseCache, ConversationBuffer
 from ..services import LLMService, AsyncManager
-from src.config.settings import load_config
+from ..config.settings import load_config # Corrected import path
 from ..config.language_config import LANGUAGE_NAMES, WHISPER_TO_KOKORO_LANG
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Centralized configuration
-config = load_config()
+config_global = load_config() # Renamed to avoid conflict
 
 class VoiceAssistant:
     """
@@ -45,6 +46,8 @@ class VoiceAssistant:
     
     def __init__(
         self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         audio_processor: Optional[BluetoothAudioProcessor] = None,
         stt_engine: Optional[HuggingFaceSTTEngine] = None,
         tts_engine: Optional[KokoroTTSEngine] = None,
@@ -55,12 +58,14 @@ class VoiceAssistant:
         conversation_buffer: Optional[ConversationBuffer] = None,
         llm_service: Optional[LLMService] = None,
         async_manager: Optional[AsyncManager] = None,
-        config: Optional[Dict[str, Any]] = None
+        app_config: Optional[Dict[str, Any]] = None # Renamed from config
     ):
         """
         Initialize the voice assistant with dependency injection.
         
         Args:
+            user_id: Optional user identifier.
+            session_id: Optional session identifier.
             audio_processor: Audio processing component
             stt_engine: Speech-to-text engine
             tts_engine: Text-to-speech engine
@@ -71,16 +76,16 @@ class VoiceAssistant:
             conversation_buffer: Conversation tracking buffer
             llm_service: LLM service for response generation
             async_manager: Async operations manager
-            config: Application configuration (required)
+            app_config: Application configuration
         """
         logger.info("🧠 Initializing VoiceAssistant with dependency injection...")
 
         # Store configuration
-        self.config = config
+        self.config = app_config if app_config is not None else config_global
 
-        # Session and user tracking (set early for memory manager)
-        self.user_id = "voice_user_01"
-        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        # Session and user tracking
+        self.user_id = user_id if user_id else getattr(self.config, 'user_id', "default_user")
+        self.session_id = session_id if session_id else f"session_{uuid.uuid4()}"
 
         # Initialize or use provided components
         self.audio_processor = audio_processor or BluetoothAudioProcessor()
@@ -97,7 +102,12 @@ class VoiceAssistant:
         self.memory_manager = memory_manager or self._setup_memory_manager()
 
         # Conversation state
-        self.current_language = self.config.audio.get("default_language", "en") if hasattr(self.config.audio, "get") else getattr(self.config.audio, "default_language", "en")
+        audio_config = getattr(self.config, 'audio', None)
+        default_lang = "en"
+        if audio_config:
+            default_lang = getattr(audio_config, "default_language", "en")
+        
+        self.current_language = default_lang
         self.turn_count = 0
         self.voice_detection_successes = 0
         self.total_response_time = deque(maxlen=20)
@@ -106,55 +116,92 @@ class VoiceAssistant:
         self.http_session: Optional[aiohttp.ClientSession] = None
 
         # Cache configuration
-        self.cache_ttl_seconds = 180
+        self.cache_ttl_seconds = 180 # Consider moving to config
 
         logger.info(f"👤 User ID: {self.user_id}, Session: {self.session_id}")
         self._log_configuration()
     
     def _setup_memory_manager(self) -> AMemMemoryManager:
         """
-        Set up the memory manager with Qdrant configuration.
+        Set up the AMemMemoryManager using centralized configuration.
+        This uses ChromaDB for persistence, configured per user.
         
         Returns:
             Configured AMemMemoryManager instance
         """
-        logger.info("🔧 Setting up memory manager with Qdrant...")
+        logger.info("🔧 Setting up AMemMemoryManager with ChromaDB persistence using centralized config...")
+
+        memory_conf = getattr(self.config, 'memory', None)
+        deployment_conf = getattr(self.config, 'deployment', None)
+
+        # Defaults, to be overridden by config if available
+        amem_embedder_model = 'all-MiniLM-L6-v2'
+        amem_llm_model = "llama3.2:3b"
+        amem_evo_threshold = 50
+        # Default base path for user-specific ChromaDBs, from deployment config
+        persist_dir_base = "./chroma_db_amem"
+        amem_llm_backend = "ollama" # Default, as not in centralized MemoryConfig
+        amem_api_key = None # Default, as not in centralized MemoryConfig
+
+        if memory_conf:
+            amem_embedder_model = getattr(memory_conf, 'embedder_model', amem_embedder_model)
+            amem_llm_model = getattr(memory_conf, 'llm_model', amem_llm_model)
+            amem_evo_threshold = getattr(memory_conf, 'evolution_threshold', amem_evo_threshold)
+            # Note: amem_llm_backend and amem_api_key are not in MemoryConfig,
+            # so they will use defaults or require direct setting if needed.
+            logger.info(f"Loaded from MemoryConfig: embedder_model='{amem_embedder_model}', "
+                        f"llm_model='{amem_llm_model}', evolution_threshold={amem_evo_threshold}")
+
+        if deployment_conf:
+            persist_dir_base = getattr(deployment_conf, 'chroma_db_path', persist_dir_base)
+            logger.info(f"Loaded from DeploymentConfig: chroma_db_path='{persist_dir_base}'")
         
-        # Set up dummy OpenAI key for local use
-        os.environ["OPENAI_API_KEY"] = "dummy-key-for-local-use"
-        
-        # Initialize Qdrant client
-        # Parse Qdrant host and port from centralized config
-        from urllib.parse import urlparse
-        qdrant_url = getattr(config.network, "qdrant_url", "http://localhost:6333")
-        parsed = urlparse(qdrant_url)
-        qdrant_host = parsed.hostname or "localhost"
-        qdrant_port = parsed.port or 6333
-        qclient = QdrantClient(host=qdrant_host, port=qdrant_port)
-        collections_response = qclient.get_collections()
-        collection_names = [c.name for c in collections_response.collections]
-        
-        # Create collection if it doesn't exist
-        if "amem_voice_collection" in collection_names:
-            logger.info("✅ Qdrant collection 'amem_voice_collection' already exists.")
-        else:
-            logger.info("Creating Qdrant collection 'amem_voice_collection'...")
-            qclient.create_collection(
-                collection_name="amem_voice_collection",
-                vectors_config=VectorParams(size=384, distance=Distance.COSINE),
-            )
-        
-        return AMemMemoryManager(self.user_id)
+        # A-MEM might internally use libraries that check for OPENAI_API_KEY.
+        # Set a dummy one if no specific API key for A-MEM's LLM is configured and OPENAI_API_KEY is not already set.
+        # This is a general precaution.
+        if "OPENAI_API_KEY" not in os.environ and not amem_api_key:
+             os.environ["OPENAI_API_KEY"] = "dummy-key-for-amem-local-use"
+             logger.info("Set dummy OPENAI_API_KEY for A-MEM local use as it was not present.")
+
+
+        logger.info(f"AMemMemoryManager effective config: user_id='{self.user_id}', "
+                    f"amem_model='{amem_embedder_model}', llm_backend='{amem_llm_backend}', "
+                    f"llm_model='{amem_llm_model}', evo_threshold={amem_evo_threshold}, "
+                    f"persist_directory_base='{persist_dir_base}', api_key provided: {amem_api_key is not None}")
+
+        return AMemMemoryManager(
+            user_id=self.user_id,
+            amem_model=amem_embedder_model,
+            llm_backend=amem_llm_backend, # Using default or passed-in if AMemMemoryManager is ever directly instantiated elsewhere
+            llm_model=amem_llm_model,
+            evo_threshold=amem_evo_threshold,
+            persist_directory_base=persist_dir_base,
+            api_key=amem_api_key # Using default or passed-in
+        )
     
     def _log_configuration(self):
         """Log the current system configuration."""
-        if config.llm.use_ollama:
-            logger.info(f"🗣️ Conversational LLM: Ollama ({config.llm.ollama_model} via {config.llm.ollama_url})")
+        llm_config = getattr(self.config, 'llm', None)
+        memory_config = getattr(self.config, 'memory', None)
+        audio_config = getattr(self.config, 'audio', None)
+
+        if llm_config:
+            if getattr(llm_config, 'use_ollama', False):
+                logger.info(f"🗣️ Conversational LLM: Ollama ({getattr(llm_config, 'ollama_model', 'N/A')} via {getattr(llm_config, 'ollama_url', 'N/A')})")
+            else:
+                logger.info(f"🗣️ Conversational LLM: LM Studio ({getattr(llm_config, 'lm_studio_model', 'N/A')} via {getattr(llm_config, 'lm_studio_url', 'N/A')})")
         else:
-            logger.info(f"🗣️ Conversational LLM: LM Studio ({config.llm.lm_studio_model} via {config.llm.lm_studio_url})")
+            logger.warning("LLM configuration not found.")
+
+        if memory_config:
+            logger.info(f"🧠 A-MEM System: {getattr(memory_config, 'llm_model', 'N/A')} with {getattr(memory_config, 'embedder_model', 'N/A')} embeddings")
+        else:
+            logger.warning("Memory configuration not found.")
         
-        logger.info(f"🧠 A-MEM System: {config.memory.llm_model} with {config.memory.embedder_model} embeddings")
-        logger.info(f"🎤 STT System: Hugging Face Transformers (Model: {config.audio.hf_model_id})")
+        if audio_config:
+            logger.info(f"🎤 STT System: Hugging Face Transformers (Model: {getattr(audio_config, 'hf_model_id', 'N/A')})")
+        else:
+            logger.warning("Audio configuration not found.")
     
     async def initialize_async(self):
         """Initialize async components for the voice assistant."""
