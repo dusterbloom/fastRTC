@@ -9,7 +9,7 @@ from typing import Tuple
 
 # Audio configuration constants (extracted from original)
 AUDIO_SAMPLE_RATE = 16000
-MINIMAL_SILENT_FRAME_DURATION_MS = 20
+MINIMAL_SILENT_FRAME_DURATION_MS = 200
 
 # Calculated constants based on sample rate
 MINIMAL_SILENT_SAMPLES = int(AUDIO_SAMPLE_RATE * (MINIMAL_SILENT_FRAME_DURATION_MS / 1000.0))
@@ -19,7 +19,7 @@ SILENT_AUDIO_CHUNK_ARRAY = np.zeros(MINIMAL_SILENT_SAMPLES, dtype=np.float32)
 SILENT_AUDIO_FRAME_TUPLE = (AUDIO_SAMPLE_RATE, SILENT_AUDIO_CHUNK_ARRAY)
 
 # Audio processing constants
-DEFAULT_CHUNK_DURATION = 2.0  # seconds
+DEFAULT_CHUNK_DURATION = 5.5  # seconds
 DEFAULT_NOISE_THRESHOLD = 0.15
 DEFAULT_AUDIO_FORMAT = np.float32
 

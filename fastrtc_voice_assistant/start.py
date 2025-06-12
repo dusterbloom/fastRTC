@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Colorful FastRTC Voice Assistant – FastAPI edition
@@ -29,7 +30,7 @@ from colorama import Back, Fore, Style, init
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastrtc import (ReplyOnPause, Stream, audio_to_bytes, get_tts_model)
+from fastrtc import (ReplyOnPause, Stream, audio_to_bytes, get_tts_model, SileroVadOptions)
 from fastrtc.utils import AdditionalOutputs
 
 # ────────────────────────── APP INTERNALS  ───────────────────────────
@@ -46,6 +47,8 @@ from src.config.settings import DEFAULT_LANGUAGE, load_config  # noqa: E402
 from src.core.interfaces import AudioData, TranscriptionResult  # noqa: E402
 from src.core.voice_assistant import VoiceAssistant  # noqa: E402
 from src.utils.logging import get_logger, setup_logging  # noqa: E402
+# from src.utils.adaptive_vad import AdaptiveVAD
+from src.utils.sota_adaptive_vad import SimpleSOTAAdaptiveVAD, VADConfig
 
 # ────────────────────────── INITIAL SET-UP  ─────────────────────────
 init(autoreset=True)                # colour logging
@@ -56,6 +59,20 @@ logger = get_logger(__name__)
 voice_assistant: Optional[VoiceAssistant] = None
 main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 async_worker_thread: Optional[threading.Thread] = None
+# --- FIX: Add a global reference for the processor ---
+# This allows the callback to access and modify the processor's VAD options.
+assistant_processor: Optional[ReplyOnPause] = None
+
+vad_config = VADConfig(
+    use_energy_features=True,
+    use_snr_adaptation=True,
+    threshold_min_silence_ms=800,
+    threshold_max_silence_ms=4000,
+    adaptation_rate=0.25,
+    cutoff_threshold_s=1.2,  # Anything shorter than 1.2s might be a cutoff
+    recovery_boost_ms=1200
+)
+adaptive_vad = SimpleSOTAAdaptiveVAD(vad_config)
 
 
 # Typed alias for the audio chunks we pass around
@@ -85,15 +102,17 @@ def print_timing(m):      print_colorful(f"⏱️ Timing: {m}", Fore.LIGHTBLUE_E
 # ────────────────────────── AUDIO CALLBACK  ─────────────────────────
 def voice_assistant_callback_rt(audio_data_tuple: tuple):
     """
-    The core callback used by fastrtc.Stream.
-    Unchanged from the original file – shortened here for brevity
-    (all the STT / LLM / TTS logic is identical).
+    Enhanced callback with SOTA adaptive VAD.
     """
+    # --- FIX: Add assistant_processor to the global declaration ---
+    global assistant_stream, adaptive_vad, assistant_processor
+    
     try:
-        # Process audio (simplified from original)
+        # Process audio input (same as before)
         if isinstance(audio_data_tuple, tuple) and len(audio_data_tuple) == 2:
             sample_rate, raw_audio_array = audio_data_tuple
             
+            # Audio preprocessing (keep your existing code)
             if isinstance(raw_audio_array, np.ndarray) and len(raw_audio_array.shape) > 1:
                 if raw_audio_array.shape[0] == 1:
                     audio_array = raw_audio_array[0]
@@ -119,11 +138,43 @@ def voice_assistant_callback_rt(audio_data_tuple: tuple):
             yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
             return
 
-        # Language names mapping
+        # --- ENHANCED VAD ADAPTATION ---
+        # Calculate speech duration
+        speech_duration_s = len(audio_array) / sample_rate if sample_rate > 0 else 0
+        
+        # Record the turn with full audio analysis
+        adaptive_vad.record_turn(speech_duration_s, audio_array, sample_rate)
+        
+        # Get updated VAD options
+        new_vad_options: SileroVadOptions = adaptive_vad.get_current_vad_options(speech_duration_s)
+        
+        # Get VAD status for logging
+        vad_status = adaptive_vad.get_status()
+        print_info(f"VAD: silence={vad_status['current_silence_ms']}ms, "
+                  f"recovery={vad_status['in_recovery']}, "
+                  f"SNR={vad_status['avg_snr']}")
+        
+        # --- FIX: This block is rewritten to fix the AttributeError ---
+        # The original code tried to access `assistant_stream.processor`, which
+        # does not exist. We now use the global `assistant_processor` reference.
+        # Instead of creating a new ReplyOnPause object, we just update the
+        # `model_options` on the existing one. This is effective because
+        # ReplyOnPause reads these options on each processing cycle.
+        if (assistant_processor and hasattr(assistant_processor, 'model_options') and
+            (abs(assistant_processor.model_options.min_silence_duration_ms -
+                 new_vad_options.min_silence_duration_ms) > 100 or
+             vad_status['in_recovery'])):
+            
+            print_info(f"Updating VAD parameters: silence_ms -> {new_vad_options.min_silence_duration_ms}")
+            assistant_processor.model_options = new_vad_options
+        # --- END FIX ---
+
+        # --- END ENHANCED VAD ADAPTATION ---
+        # Prepare for STT processing
         lang_names = {
-            'a': 'American English', 'b': 'British English', 'i': 'Italian', 
-            'e': 'Spanish', 'f': 'French', 'p': 'Portuguese', 
-            'j': 'Japanese', 'z': 'Chinese', 'h': 'Hindi'
+        'a': 'American English', 'b': 'British English', 'i': 'Italian', 
+        'e': 'Spanish', 'f': 'French', 'p': 'Portuguese', 
+        'j': 'Japanese', 'z': 'Chinese', 'h': 'Hindi'
         }
 
         # STT processing
@@ -151,12 +202,12 @@ def voice_assistant_callback_rt(audio_data_tuple: tuple):
                     voice_assistant.current_language = detected_language
                     lang_name = lang_names.get(detected_language, 'Unknown')
                     print_language(f"Switched to {lang_name} ({detected_language})")
-                
+                    
             except Exception as e:
                 print_error(f"STT failed: {e}")
                 user_text = ""
                 detected_language = DEFAULT_LANGUAGE
-
+        
         if not user_text.strip():
             yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
             return
@@ -265,6 +316,7 @@ def voice_assistant_callback_rt(audio_data_tuple: tuple):
 
     except Exception as e:
         print_error(f"Critical error in callback: {e}")
+        logger.exception("Full traceback for critical callback error:")
         yield EMPTY_AUDIO_YIELD_OUTPUT
 
 
@@ -321,11 +373,27 @@ def run_coro_from_sync_thread_with_timeout(coro, timeout: float = 4.0) -> Any:
 # ────────────────────────── BUILD THE STREAM  ────────────────────────
 setup_async_environment()  # initialise before we build the Stream
 
+
+initial_vad_options = adaptive_vad.get_current_vad_options()
+initial_status = adaptive_vad.get_status()
+print_info(f"Initial VAD configuration: {initial_status}")
+
+# --- FIX: Instantiate the processor first and store it in our global variable ---
+# The original code created the ReplyOnPause processor anonymously inside the
+# Stream constructor, making it inaccessible later.
+assistant_processor = ReplyOnPause(
+    voice_assistant_callback_rt,
+    can_interrupt=True,
+    model_options=initial_vad_options
+)
+
+# Now, create the stream using the processor instance we just created.
 assistant_stream = Stream(
-    ReplyOnPause(voice_assistant_callback_rt),
+    assistant_processor,
     modality="audio",
     mode="send-receive",
 )
+
 
 # ────────────────────────── FASTAPI APP  ────────────────────────────
 app = FastAPI(title="FastRTC Voice Assistant", version="1.0.0")

@@ -13,9 +13,9 @@ from typing import Dict, List, Optional
 class AudioConfig:
     """Audio processing configuration."""
     sample_rate: int = 16000
-    chunk_duration: float = 2.0
+    chunk_duration: float = 5.50
     noise_threshold: float = 0.15
-    minimal_silent_frame_duration_ms: int = 20
+    minimal_silent_frame_duration_ms: int = 200
     
     # Extracted from original configuration
     hf_model_id: str = field(

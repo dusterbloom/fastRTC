@@ -1,5 +1,7 @@
 """HuggingFace STT engine implementation."""
 
+import logging
+import time
 import asyncio
 import io
 import numpy as np
@@ -18,6 +20,7 @@ from ....config.settings import AudioConfig
 from ....utils.logging import get_logger
 
 logger = get_logger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def get_device(force_cpu: bool = False) -> str:
@@ -130,7 +133,8 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
     def _initialize_model(self) -> None:
         """Initialize the HuggingFace model and pipeline."""
         try:
-            logger.info(f"🧠 Loading STT model (Hugging Face: {self.model_id})...")
+            logger.info(f"🧠 Profiling: Starting STT model load (Hugging Face: {self.model_id})...")
+            overall_start_time = time.monotonic()
             
             # Setup device and dtypes
             self.device = get_device(force_cpu=self.force_cpu)
@@ -145,6 +149,8 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
             logger.info(f"Using attention implementation: {attention}")
             
             # Load model and processor
+            logger.info(f"🧠 Profiling: Starting AutoModelForSpeechSeq2Seq.from_pretrained for {self.model_id}...")
+            model_load_start_time = time.monotonic()
             self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
                 self.model_id,
                 torch_dtype=self.torch_dtype,
@@ -152,11 +158,24 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
                 use_safetensors=True,
                 attn_implementation=attention
             )
+            model_load_duration = time.monotonic() - model_load_start_time
+            logger.info(f"🧠 Profiling: AutoModelForSpeechSeq2Seq.from_pretrained for {self.model_id} took {model_load_duration:.2f}s")
+
+            logger.info(f"🧠 Profiling: Starting model.to({self.device}) for {self.model_id}...")
+            model_to_device_start_time = time.monotonic()
             self.model.to(self.device)
+            model_to_device_duration = time.monotonic() - model_to_device_start_time
+            logger.info(f"🧠 Profiling: model.to({self.device}) for {self.model_id} took {model_to_device_duration:.2f}s")
             
+            logger.info(f"🧠 Profiling: Starting AutoProcessor.from_pretrained for {self.model_id}...")
+            processor_load_start_time = time.monotonic()
             self.processor = AutoProcessor.from_pretrained(self.model_id)
+            processor_load_duration = time.monotonic() - processor_load_start_time
+            logger.info(f"🧠 Profiling: AutoProcessor.from_pretrained for {self.model_id} took {processor_load_duration:.2f}s")
             
             # Create pipeline
+            logger.info(f"🧠 Profiling: Starting STT pipeline creation for {self.model_id}...")
+            pipeline_create_start_time = time.monotonic()
             self.pipeline = pipeline(
                 task="automatic-speech-recognition",
                 model=self.model,
@@ -165,8 +184,11 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
                 torch_dtype=self.torch_dtype,
                 device=self.device,
             )
+            pipeline_create_duration = time.monotonic() - pipeline_create_start_time
+            logger.info(f"🧠 Profiling: STT pipeline creation for {self.model_id} took {pipeline_create_duration:.2f}s")
             
-            logger.info(f"✅ STT model ({self.model_id}) loaded!")
+            overall_duration = time.monotonic() - overall_start_time
+            logger.info(f"✅ STT model ({self.model_id}) loaded! Total time: {overall_duration:.2f}s")
             
             # Warm up the model
             self._warmup_model()
@@ -182,10 +204,12 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
     def _warmup_model(self) -> None:
         """Warm up the model with dummy input."""
         try:
-            logger.info("Warming up STT model with dummy input...")
+            logger.info(f"🧠 Profiling: Starting STT model warmup for {self.model_id}...")
+            warmup_start_time = time.monotonic()
             warmup_audio = np.zeros((16000,), dtype=self.np_dtype)
             self.pipeline(warmup_audio)
-            logger.info("✅ STT model warmup complete.")
+            warmup_duration = time.monotonic() - warmup_start_time
+            logger.info(f"✅ STT model warmup complete for {self.model_id}. Took {warmup_duration:.2f}s")
         except Exception as e:
             logger.warning(f"Model warmup failed: {e}")
     

@@ -59,15 +59,15 @@ class FastRTCBridge:
                     callback_function,
                     can_interrupt=True,
                     algo_options=AlgoOptions(
-                        audio_chunk_duration=2.0,
+                        audio_chunk_duration=0.5,
                         started_talking_threshold=0.15,
                         speech_threshold=speech_threshold
                     ),
                     model_options=SileroVadOptions(
-                        threshold=0.3,
-                        min_speech_duration_ms=250,
-                        min_silence_duration_ms=2000,
-                        speech_pad_ms=200,
+                        threshold=0.15,
+                        min_speech_duration_ms=100,
+                        min_silence_duration_ms=3000,
+                        speech_pad_ms=500,
                         window_size_samples=512
                     )
                 ),

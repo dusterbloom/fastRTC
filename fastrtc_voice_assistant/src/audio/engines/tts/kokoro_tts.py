@@ -1,5 +1,7 @@
 """Kokoro TTS engine implementation."""
 
+import time
+import logging
 import asyncio
 import numpy as np
 from typing import List, Dict, Any, Optional, Generator, Tuple
@@ -12,6 +14,7 @@ from ....config.language_config import KOKORO_VOICE_MAP, KOKORO_TTS_LANG_MAP, DE
 from ....utils.logging import get_logger
 
 logger = get_logger(__name__)
+logger.setLevel(logging.INFO)
 
 # Import real fastRTC TTS model like V4
 try:
@@ -40,11 +43,16 @@ class KokoroTTSEngine(BaseTTSEngine):
     def _initialize_model(self) -> None:
         """Initialize the Kokoro TTS model using fastRTC like V4."""
         try:
-            logger.info("🗣️ Loading TTS model (Kokoro via fastRTC)...")
+            logger.info("🧠 Profiling: Starting Kokoro TTS model load (via fastRTC)...")
+            overall_start_time = time.monotonic()
             
             if USE_FASTRTC_TTS:
                 # Use real fastRTC TTS model like V4
+                logger.info("🧠 Profiling: Calling get_tts_model('kokoro')...")
+                model_load_start_time = time.monotonic()
                 self.tts_model = get_tts_model("kokoro")
+                model_load_duration = time.monotonic() - model_load_start_time
+                logger.info(f"🧠 Profiling: get_tts_model('kokoro') took {model_load_duration:.2f}s")
                 logger.info("✅ Using real fastRTC Kokoro TTS implementation")
                 
                 # Check available voices like V4
@@ -63,9 +71,10 @@ class KokoroTTSEngine(BaseTTSEngine):
                 # Fallback to stub implementation
                 self.tts_model = KokoroONNX()
                 logger.warning("⚠️ Using Kokoro ONNX stub implementation (fastRTC not available)")
-            
-            logger.info("✅ Kokoro TTS model loaded successfully!")
+            overall_duration = time.monotonic() - overall_start_time
+            logger.info(f"✅ Kokoro TTS model loaded successfully! Total time: {overall_duration:.2f}s")
             self._set_available(True)
+            
             
         except ImportError as e:
             logger.error(f"❌ Kokoro TTS not available: {e}")

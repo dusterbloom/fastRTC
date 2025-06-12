@@ -1,4 +1,8 @@
 from typing import List, Dict, Any, Optional, Union
+import time
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
 import nltk
@@ -30,12 +34,26 @@ class ChromaRetriever:
         os.makedirs(persist_directory, exist_ok=True)
         
         # Use PersistentClient instead of Client for persistent storage!
+        logger.info(f"🧠 Profiling: Initializing ChromaDB PersistentClient at {persist_directory}...")
+        client_init_start_time = time.monotonic()
         self.client = chromadb.PersistentClient(path=persist_directory)
+        client_init_duration = time.monotonic() - client_init_start_time
+        logger.info(f"🧠 Profiling: ChromaDB PersistentClient initialized in {client_init_duration:.2f}s")
+
+        logger.info(f"🧠 Profiling: Initializing SentenceTransformerEmbeddingFunction with model {model_name}...")
+        sbert_load_start_time = time.monotonic()
         self.embedding_function = SentenceTransformerEmbeddingFunction(model_name=model_name)
+        sbert_load_duration = time.monotonic() - sbert_load_start_time
+        logger.info(f"🧠 Profiling: SentenceTransformerEmbeddingFunction ({model_name}) loaded in {sbert_load_duration:.2f}s")
+
+        logger.info(f"🧠 Profiling: Getting or creating ChromaDB collection '{collection_name}'...")
+        collection_init_start_time = time.monotonic()
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
             embedding_function=self.embedding_function
         )
+        collection_init_duration = time.monotonic() - collection_init_start_time
+        logger.info(f"🧠 Profiling: ChromaDB collection '{collection_name}' ready in {collection_init_duration:.2f}s")
         
     def add_document(self, document: str, metadata: Dict, doc_id: str):
         """Add a document to ChromaDB.

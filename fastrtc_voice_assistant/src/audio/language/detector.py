@@ -1,5 +1,7 @@
 """Language detection implementations for FastRTC Voice Assistant."""
 
+import time
+import logging
 from abc import ABC, abstractmethod
 from typing import Tuple, Dict, List, Optional
 from pathlib import Path
@@ -9,6 +11,7 @@ from ...config.language_config import DEFAULT_LANGUAGE
 from ...utils.logging import get_logger
 
 logger = get_logger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class MediaPipeLanguageDetector(LanguageDetector):
@@ -76,10 +79,13 @@ class MediaPipeLanguageDetector(LanguageDetector):
             from mediapipe.tasks import python
             from mediapipe.tasks.python import text
             
+            logger.info(f"🧠 Profiling: Starting MediaPipe LanguageDetector.create_from_options with model {self.model_path}...")
+            model_load_start_time = time.monotonic()
             base_options = python.BaseOptions(model_asset_path=self.model_path)
             options = text.LanguageDetectorOptions(base_options=base_options)
             self._detector = text.LanguageDetector.create_from_options(options)
-            logger.info("✅ MediaPipe language detector initialized")
+            model_load_duration = time.monotonic() - model_load_start_time
+            logger.info(f"✅ MediaPipe language detector initialized. Model load took {model_load_duration:.2f}s")
             
         except ImportError as e:
             logger.warning(f"MediaPipe not available: {e}")
