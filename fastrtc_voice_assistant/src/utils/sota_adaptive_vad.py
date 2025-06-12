@@ -15,19 +15,21 @@ class VADConfig:
     use_snr_adaptation: bool = True
     
     # Adaptive thresholds
-    threshold_min_silence_ms: int = 800
+    threshold_min_silence_ms: int = 1000
     threshold_max_silence_ms: int = 5000
     threshold_min_speech_ms: int = 200
     threshold_max_speech_ms: int = 800
     
     # Adaptation settings
-    adaptation_rate: float = 0.2
+    adaptation_rate: float = 0.6  # Make it much more responsive
+    pause_history_size: int = 3   # Consider the last 3 pauses
     snr_window_size: int = 20
     
     # Recovery settings
     cutoff_threshold_s: float = 1.5      # A short utterance that might be a cutoff
     recovery_boost_ms: int = 1500        # How much to increase silence threshold in recovery
     recovery_cooldown_turns: int = 2     # Need 2 good turns to exit recovery mode
+
 
 class SimpleSOTAAdaptiveVAD:
     """
@@ -42,11 +44,12 @@ class SimpleSOTAAdaptiveVAD:
         self.speech_history = collections.deque(maxlen=10)
         self.energy_history = collections.deque(maxlen=50)
         self.snr_history = collections.deque(maxlen=config.snr_window_size)
+        self.pause_history = collections.deque(maxlen=config.pause_history_size) # NEW
         
         # Current parameters
-        self.current_silence_ms = 2000
+        self.current_silence_ms = 2500 # Start with a more patient default
         self.current_speech_ms = 300
-        self.current_pad_ms = 400
+        self.current_pad_ms = 600
         
         # Recovery tracking
         self.consecutive_short_utterances = 0
@@ -110,31 +113,34 @@ class SimpleSOTAAdaptiveVAD:
                     self.in_recovery_mode = False
                     self.good_turns_since_recovery = 0
 
-    def record_turn(self, speech_duration_s: float, audio_array: Optional[np.ndarray] = None,
-                   sample_rate: int = 16000):
+    def record_turn(self, speech_duration_s: float, audio_array: Optional[np.ndarray] = None, sample_rate: int = 16000):
         """Record a speech turn and update parameters."""
         current_time = time.time()
         
-        # First, determine our state (are we recovering from a cutoff?)
         self.detect_and_handle_cutoffs(speech_duration_s)
         
         # --- ADAPTATION LOGIC ---
-        # If we are NOT in recovery mode, adapt to the user's inter-sentence pace.
-        if not self.in_recovery_mode and self.last_speech_end_time:
+        # ALWAYS adapt to the user's pace, even in recovery mode.
+        if self.last_speech_end_time:
             silence_since_last_turn_s = current_time - self.last_speech_end_time
+            self.pause_history.append(silence_since_last_turn_s)
             
-            # Target a silence threshold based on the observed pause
-            target_silence_ms = int(silence_since_last_turn_s * 1000 * 0.9) # Be more generous
+            # Use the median of recent pauses for a more stable target.
+            # This prevents one very long or short pause from skewing the adaptation too much.
+            median_pause_s = np.median(list(self.pause_history))
+            
+            # Be generous: aim for 90% of the median pause time.
+            target_silence_ms = int(median_pause_s * 1000 * 0.9)
             
             target_silence_ms = max(self.config.threshold_min_silence_ms,
                                     min(self.config.threshold_max_silence_ms, target_silence_ms))
             
-            # Smoothly adapt towards the new target
+            # Smoothly adapt towards the new target with the higher adaptation rate.
             self.current_silence_ms = int(
                 (1 - self.config.adaptation_rate) * self.current_silence_ms +
                 self.config.adaptation_rate * target_silence_ms
             )
-            print(f"🎤 Pace adaptation: observed pause={silence_since_last_turn_s:.1f}s, new silence_ms={self.current_silence_ms}")
+            print(f"🎤 Pace adaptation: observed pause={silence_since_last_turn_s:.1f}s, median={median_pause_s:.1f}s, new silence_ms={self.current_silence_ms}")
 
         if audio_array is not None and len(audio_array) > 0:
             features = self.extract_basic_features(audio_array, sample_rate)
@@ -142,7 +148,8 @@ class SimpleSOTAAdaptiveVAD:
         
         self.speech_history.append({'duration': speech_duration_s, 'timestamp': current_time})
         self.last_speech_end_time = current_time
-    
+
+
     def get_current_vad_options(self, last_speech_duration_s: Optional[float] = None) -> SileroVadOptions:
         """Get current VAD options with all adaptations applied."""
         silence_ms = self.current_silence_ms
