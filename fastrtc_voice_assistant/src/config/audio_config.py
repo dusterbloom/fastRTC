@@ -4,8 +4,12 @@ This module contains audio-related configuration extracted from the original
 monolithic implementation.
 """
 
+import os
 import numpy as np
 from typing import Tuple
+
+# STT Backend configuration
+STT_BACKEND = os.environ.get('STT_BACKEND', 'huggingface').lower()
 
 # Audio configuration constants (extracted from original)
 AUDIO_SAMPLE_RATE = 16000

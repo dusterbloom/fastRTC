@@ -1,9 +1,17 @@
 """Speech-to-Text engines for FastRTC Voice Assistant."""
 
-from .huggingface_stt import HuggingFaceSTTEngine
+import os
 from .base import BaseSTTEngine
 
+# Check STT backend configuration (defaults to existing engine)
+STT_BACKEND = os.environ.get('STT_BACKEND', 'huggingface').lower()
+
+if STT_BACKEND == "faster":
+    from .faster_whisper_stt import FasterWhisperSTT as STTEngine
+else:
+    from .huggingface_stt import HuggingFaceSTTEngine as STTEngine
+
 __all__ = [
-    'HuggingFaceSTTEngine',
+    'STTEngine',
     'BaseSTTEngine'
 ]
