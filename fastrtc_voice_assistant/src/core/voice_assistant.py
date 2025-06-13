@@ -216,20 +216,49 @@ class VoiceAssistant:
             Processed audio tuple (sample_rate, audio_array)
         """
         # Convert audio_data to AudioData format for processing
+        import numpy as np
+
+        # Log input audio stats
         if isinstance(audio_data, tuple) and len(audio_data) == 2:
             sample_rate, audio_array = audio_data
-            
-            # Ensure audio is single channel (convert from multi-channel if needed)
-            if isinstance(audio_array, np.ndarray) and len(audio_array.shape) > 1:
-                if audio_array.shape[1] > 1:  # Multi-channel
-                    audio_array = np.mean(audio_array, axis=1)  # Convert to mono
-                elif audio_array.shape[0] > 1 and audio_array.shape[1] == 1:  # Single column
-                    audio_array = audio_array.flatten()
-            
-            # Ensure float32 type
+            if isinstance(audio_array, np.ndarray) and audio_array.size > 0:
+                logger.info(
+                    f"[AUDIO DIAG] Input: shape={audio_array.shape}, dtype={audio_array.dtype}, "
+                    f"min={audio_array.min():.6f}, max={audio_array.max():.6f}, "
+                    f"mean={audio_array.mean():.6f}, rms={np.sqrt(np.mean(audio_array**2)):.6f}"
+                )
+
+            # --- Robust flattening and conversion for all common shapes ---
             if isinstance(audio_array, np.ndarray):
-                audio_array = audio_array.astype(np.float32)
-            
+                # --- Match start_original_backup.py audio flattening logic ---
+                # Squeeze to remove single-dimensional entries
+                audio_array = np.squeeze(audio_array)
+                # If still 2D, average across axis 0 or 1 to get mono
+                if len(audio_array.shape) > 1:
+                    if audio_array.shape[0] == 1:
+                        audio_array = audio_array[0]
+                    elif audio_array.shape[1] == 1:
+                        audio_array = audio_array[:, 0]
+                    elif audio_array.shape[1] > 1:
+                        audio_array = np.mean(audio_array, axis=1)
+                    else:
+                        audio_array = audio_array.flatten()
+                # Convert int16 to float32 in range [-1, 1]
+                if isinstance(audio_array, np.ndarray):
+                    if audio_array.dtype == np.int16:
+                        audio_array = audio_array.astype(np.float32) / 32768.0
+                    else:
+                        audio_array = audio_array.astype(np.float32)
+    
+                    # --- Resample to 16kHz mono if needed ---
+                    TARGET_SAMPLE_RATE = 16000
+                    if sample_rate != TARGET_SAMPLE_RATE:
+                        from scipy.signal import resample
+                        num_samples = int(len(audio_array) * TARGET_SAMPLE_RATE / sample_rate)
+                        audio_array = resample(audio_array, num_samples)
+                        logger.warning(f"[AUDIO DIAG] Resampled from {sample_rate}Hz to {TARGET_SAMPLE_RATE}Hz, new shape={audio_array.shape}")
+                        sample_rate = TARGET_SAMPLE_RATE
+
             audio_data_obj = AudioData(
                 samples=audio_array,
                 sample_rate=sample_rate,
@@ -245,6 +274,15 @@ class VoiceAssistant:
         
         # Process through the audio processor
         processed_audio = self.audio_processor.process(audio_data_obj)
+
+        # Log processed audio stats
+        if hasattr(processed_audio, "samples") and isinstance(processed_audio.samples, np.ndarray) and processed_audio.samples.size > 0:
+            logger.info(
+                f"[AUDIO DIAG] Processed: shape={processed_audio.samples.shape}, dtype={processed_audio.samples.dtype}, "
+                f"min={processed_audio.samples.min():.6f}, max={processed_audio.samples.max():.6f}, "
+                f"mean={processed_audio.samples.mean():.6f}, rms={np.sqrt(np.mean(processed_audio.samples**2)):.6f}"
+            )
+
         return processed_audio.sample_rate, processed_audio.samples
     
     async def process_audio_turn(self, user_text: str) -> str:

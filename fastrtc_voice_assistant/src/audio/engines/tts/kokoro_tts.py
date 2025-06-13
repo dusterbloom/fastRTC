@@ -74,6 +74,16 @@ class KokoroTTSEngine(BaseTTSEngine):
             overall_duration = time.monotonic() - overall_start_time
             logger.info(f"✅ Kokoro TTS model loaded successfully! Total time: {overall_duration:.2f}s")
             self._set_available(True)
+            # --- CRITICAL DEBUG: Log available voices after model load ---
+            try:
+                available_voices = []
+                if hasattr(self.tts_model, "model") and hasattr(self.tts_model.model, "voices"):
+                    available_voices = list(getattr(self.tts_model.model, "voices", []))
+                elif hasattr(self.tts_model, "voices"):
+                    available_voices = list(getattr(self.tts_model, "voices", []))
+                logger.critical(f"[TTS CRITICAL] Available voices in TTS model after load: {available_voices[:10]}")
+            except Exception as e:
+                logger.critical(f"[TTS CRITICAL] Could not list available voices from TTS model: {e}")
             
             
         except ImportError as e:

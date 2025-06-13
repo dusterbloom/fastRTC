@@ -12,10 +12,12 @@ from datetime import datetime, timezone
 from typing import Tuple, Generator, Any, Optional
 from fastrtc import AdditionalOutputs
 
+from ..core.interfaces import TranscriptionResult # Added import
 from ..audio import HuggingFaceSTTEngine, KokoroTTSEngine, HybridLanguageDetector, VoiceMapper
 from ..audio.engines.tts.kokoro_tts import KokoroTTSOptions
 from ..utils.async_utils import run_coro_from_sync_thread_with_timeout
 from ..utils.logging import get_logger
+from ..utils.sota_adaptive_vad import SimpleSOTAAdaptiveVAD, VADConfig # Added import
 from ..config.language_config import LANGUAGE_NAMES, LANGUAGE_ABBREVIATIONS, KOKORO_TTS_LANG_MAP
 from ..config.audio_config import AUDIO_SAMPLE_RATE, SILENT_AUDIO_FRAME_TUPLE
 
@@ -40,7 +42,8 @@ class StreamCallbackHandler:
         tts_engine: KokoroTTSEngine,
         language_detector: HybridLanguageDetector,
         voice_mapper: VoiceMapper,
-        event_loop=None
+        event_loop=None,
+        adaptive_vad: Optional[SimpleSOTAAdaptiveVAD] = None # Added parameter
     ):
         """
         Initialize the stream callback handler.
@@ -52,6 +55,7 @@ class StreamCallbackHandler:
             language_detector: Language detection component
             voice_mapper: Voice mapping component
             event_loop: Async event loop for coroutine execution
+            adaptive_vad: SOTA adaptive VAD instance (optional)
         """
         self.voice_assistant = voice_assistant
         self.stt_engine = stt_engine
@@ -59,10 +63,25 @@ class StreamCallbackHandler:
         self.language_detector = language_detector
         self.voice_mapper = voice_mapper
         self.event_loop = event_loop
+        self.adaptive_vad = adaptive_vad or SimpleSOTAAdaptiveVAD(VADConfig()) # Added initialization
         
         # Language names mapping
         self.lang_names = LANGUAGE_NAMES
         self.lang_abbreviations = LANGUAGE_ABBREVIATIONS
+
+        # --- DEBUG: Log available voices from TTS model, if possible ---
+        try:
+            tts_model = getattr(self.tts_engine, "tts_model", None)
+            available_voices = []
+            if tts_model is not None:
+                # Try to get voices from tts_model.model.voices or tts_model.voices
+                if hasattr(tts_model, "model") and hasattr(tts_model.model, "voices"):
+                    available_voices = list(getattr(tts_model.model, "voices", []))
+                elif hasattr(tts_model, "voices"):
+                    available_voices = list(getattr(tts_model, "voices", []))
+        except Exception as e:
+            
+            logger.error(f"Error retrieving TTS model voices: {e}")
         
     def process_audio_stream(self, audio_data_tuple: tuple) -> Generator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None, None]:
         """
@@ -81,21 +100,89 @@ class StreamCallbackHandler:
             
         Yields:
             Tuples of (audio_data, additional_outputs) for streaming back to client
-        """
+       """
+        # (Removed verbose debug prints for cleaner terminal output)
+        try:
+            sample_rate, audio_array = audio_data_tuple
+        except Exception as e:
+            pass
         if not self.voice_assistant:
+            logger.warning("🎤 process_audio_stream: Voice assistant not initialized. Yielding empty.")
             yield EMPTY_AUDIO_YIELD_OUTPUT
             return
         
         try:
-            # Process the incoming audio data
-            sample_rate, audio_array = self.voice_assistant.process_audio_array(audio_data_tuple)
+            import numpy as np
+            print(f"🎤 process_audio_stream: Processing incoming audio data...") # Changed to info
+            # --- COPY FROM start_original_backup.py ---
+            # Process audio input (same as before)
+            if isinstance(audio_data_tuple, tuple) and len(audio_data_tuple) == 2:
+                sample_rate, raw_audio_array = audio_data_tuple
+
+                # Audio preprocessing (keep your existing code)
+                if isinstance(raw_audio_array, np.ndarray) and len(raw_audio_array.shape) > 1:
+                    if raw_audio_array.shape[0] == 1:
+                        audio_array = raw_audio_array[0]
+                    elif raw_audio_array.shape[1] == 1:
+                        audio_array = raw_audio_array[:, 0]
+                    elif raw_audio_array.shape[1] > 1:
+                        audio_array = np.mean(raw_audio_array, axis=1)
+                    else:
+                        audio_array = raw_audio_array.flatten()
+                else:
+                    audio_array = raw_audio_array if isinstance(raw_audio_array, np.ndarray) else np.array(raw_audio_array, dtype=np.float32)
+
+                if isinstance(audio_array, np.ndarray):
+                    if audio_array.dtype == np.int16:
+                        audio_array = audio_array.astype(np.float32) / 32768.0
+                    else:
+                        audio_array = audio_array.astype(np.float32)
+
+                print(f"[AUDIO DIAG] Before resample: shape={audio_array.shape}, dtype={audio_array.dtype}, first10={audio_array[:10] if hasattr(audio_array, '__getitem__') else 'N/A'}")
+
+                # --- Resample to 16kHz mono if needed ---
+                TARGET_SAMPLE_RATE = 16000
+                if sample_rate != TARGET_SAMPLE_RATE and audio_array.size > 0:
+                    from scipy.signal import resample
+                    import numpy as np
+                    num_samples = int(len(audio_array) * TARGET_SAMPLE_RATE / sample_rate)
+                    audio_array = resample(audio_array, num_samples)
+                    print(f"[AUDIO DIAG] Resampled from {sample_rate}Hz to {TARGET_SAMPLE_RATE}Hz, new shape={audio_array.shape}, first10={audio_array[:10] if hasattr(audio_array, '__getitem__') else 'N/A'}")
+                    sample_rate = TARGET_SAMPLE_RATE
+            else:
+                audio_array = np.array([], dtype=np.float32)
+                sample_rate = 16000
+
+            # (Removed verbose debug prints for cleaner terminal output)
             
-            if audio_array.size == 0:
+            if not isinstance(audio_array, np.ndarray) or audio_array.size == 0: # Modified condition
+                # (Removed verbose debug prints for cleaner terminal output)
                 yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
                 return
             
+            # --- Adaptive VAD Logic ---
+            speech_duration_s = len(audio_array) / sample_rate if sample_rate > 0 else 0
+            if self.adaptive_vad: # Ensure VAD instance exists
+                self.adaptive_vad.record_turn(speech_duration_s, audio_array, sample_rate)
+                new_vad_options = self.adaptive_vad.get_current_vad_options(speech_duration_s)
+                
+                # Log VAD status
+                vad_status = self.adaptive_vad.get_status()
+                # (Removed verbose debug prints for cleaner terminal output)
+                
+                # TODO: Implement dynamic update of FastRTC stream VAD parameters
+                # This might involve:
+                # 1. Accessing the stream object from self.voice_assistant.fastrtc_bridge
+                # 2. Calling a method on the stream object to update its VAD options
+                #    (e.g., stream.update_vad_options(new_vad_options))
+                # This functionality may need to be added to FastRTCBridge or the fastrtc library.
+                # (Removed verbose debug prints for cleaner terminal output)
+            # --- End Adaptive VAD Logic ---
+            
+            # (Removed verbose debug prints for cleaner terminal output)
             # Perform speech-to-text conversion
             user_text, detected_language = self._process_speech_to_text(audio_array, sample_rate)
+            # (Removed verbose debug prints for cleaner terminal output)
             
             if not user_text.strip():
                 yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
@@ -106,7 +193,7 @@ class StreamCallbackHandler:
             
             # Update statistics
             self.voice_assistant.voice_detection_successes += 1
-            logger.info(f"👤 User: {user_text}")
+            # (Removed verbose debug prints for cleaner terminal output)
             
             # Generate intelligent response
             assistant_response = self._generate_response(user_text)
@@ -121,6 +208,7 @@ class StreamCallbackHandler:
             logger.error(f"❌ CRITICAL Error in stream processing: {e}")
             import traceback
             traceback.print_exc()
+            logger.error("🎤 process_audio_stream: Exception caught, attempting error recovery.") # New log
             
             # Graceful error recovery
             yield from self._handle_error_recovery()
@@ -136,32 +224,41 @@ class StreamCallbackHandler:
         Returns:
             Tuple of (transcribed_text, detected_language)
         """
-        # Convert audio to bytes for STT processing
-        audio_bytes = self._audio_to_bytes((sample_rate, audio_array))
-        
-        # Perform transcription
-        outputs = self.stt_engine.transcribe(
-            audio_bytes,
-            chunk_length_s=30,
-            batch_size=1,
-            generate_kwargs={'task': 'transcribe'},
-            return_timestamps=False,
-        )
-        
-        user_text = outputs["text"].strip()
-        logger.info(f"📝 Transcribed: '{user_text}'")
+        # Perform transcription using the method that accepts audio_array and sample_rate
+        # and is designed to handle Hugging Face pipeline parameters.
+        # No need for audio_bytes conversion here as transcribe_with_sample_rate takes array.
+        try:
+            transcription_result = run_coro_from_sync_thread_with_timeout(
+                self.stt_engine.transcribe_with_sample_rate(
+                    audio_array=audio_array,
+                    sample_rate=sample_rate
+                ),
+                timeout=8.0, # Consistent with start_original_backup.py
+                event_loop=self.event_loop
+            )
+        except TimeoutError:
+            logger.warning("STT transcription timed out.")
+            transcription_result = None # Or some default TranscriptionResult
+        except Exception as e:
+            logger.error(f"STT transcription failed: {e}")
+            transcription_result = None # Or some default TranscriptionResult
+
+        # outputs is now a TranscriptionResult object
+        user_text = transcription_result.text.strip() if transcription_result and hasattr(transcription_result, 'text') else ""
+        # (Removed verbose debug prints for cleaner terminal output)
         
         # Detect language using multiple methods
-        detected_language = self._detect_language_multi_method(outputs, user_text)
+        # Pass transcription_result directly (it's an Optional[TranscriptionResult])
+        detected_language = self._detect_language_multi_method(transcription_result, user_text)
         
         return user_text, detected_language
     
-    def _detect_language_multi_method(self, stt_outputs: dict, user_text: str) -> str:
+    def _detect_language_multi_method(self, stt_outputs: Optional[TranscriptionResult], user_text: str) -> str:
         """
         Detect language using multiple detection methods for accuracy.
         
         Args:
-            stt_outputs: Outputs from STT engine
+            stt_outputs: Outputs from STT engine (TranscriptionResult object or None)
             user_text: Transcribed text
             
         Returns:
@@ -170,28 +267,30 @@ class StreamCallbackHandler:
         # Method 1: Check if Whisper provided language info
         whisper_language = 'en'  # Default
         
-        if hasattr(stt_outputs, 'get'):
-            if 'language' in stt_outputs:
-                whisper_language = stt_outputs['language']
-                logger.info(f"🎤 Whisper detected language: {whisper_language}")
-            elif 'chunks' in stt_outputs and stt_outputs['chunks']:
-                for chunk in stt_outputs['chunks']:
-                    if 'language' in chunk:
+        if stt_outputs: # Check if stt_outputs is not None
+            if hasattr(stt_outputs, 'language') and stt_outputs.language:
+                whisper_language = stt_outputs.language
+                # (Removed verbose debug prints for cleaner terminal output)
+            elif hasattr(stt_outputs, 'chunks') and stt_outputs.chunks:
+                for chunk in stt_outputs.chunks:
+                    # Assuming chunks are dicts as per HuggingFaceSTTEngine structure
+                    if isinstance(chunk, dict) and 'language' in chunk:
                         whisper_language = chunk['language']
-                        logger.info(f"🎤 Whisper chunk language: {whisper_language}")
+                        # (Removed verbose debug prints for cleaner terminal output)
                         break
         
         # Method 2: Text-based detection (primary method)
+        # This part remains unchanged as it primarily uses user_text
         text_detected_lang, confidence = self.language_detector.detect_language(user_text)
         
         # Method 3: Combine detections with priority to text detection
         if text_detected_lang != 'a':  # If text detection found non-English
             detected_language = text_detected_lang
-            logger.info(f"🔤 Text-based detection: {detected_language} (confidence: {confidence:.3f})")
+            # (Removed verbose debug prints for cleaner terminal output)
         else:
             # Fall back to Whisper detection
             detected_language = self._get_kokoro_language(whisper_language)
-            logger.info(f"🎤 Using Whisper detection: {whisper_language} -> {detected_language}")
+            # (Removed verbose debug prints for cleaner terminal output)
         
         return detected_language
     
@@ -228,10 +327,10 @@ class StreamCallbackHandler:
         if detected_language != self.voice_assistant.current_language:
             self.voice_assistant.current_language = detected_language
             lang_name = self.lang_names.get(detected_language, 'Unknown')
-            logger.info(f"🌍 Language switched to: {lang_name} ({detected_language})")
+            # (Removed verbose debug prints for cleaner terminal output)
         else:
             lang_name = self.lang_names.get(detected_language, 'Unknown')
-            logger.info(f"🌍 Language confirmed: {lang_name} ({detected_language})")
+            # (Removed verbose debug prints for cleaner terminal output)
     
     def _generate_response(self, user_text: str) -> str:
         """
@@ -259,8 +358,7 @@ class StreamCallbackHandler:
             assistant_response_text = "I encountered an issue. Could you try that again?"
         
         turn_processing_time = time.monotonic() - start_turn_time
-        logger.info(f"🤖 Assistant: {assistant_response_text}")
-        logger.info(f"⏱️ Turn Processing Time: {turn_processing_time:.2f}s")
+        # (Removed verbose debug prints for cleaner terminal output)
         
         return assistant_response_text
     
@@ -273,11 +371,12 @@ class StreamCallbackHandler:
             assistant_response: Assistant's response text
         """
         # Update conversation buffer
-        self.voice_assistant.conversation_buffer.append({
-            'user': user_text,
-            'assistant': assistant_response,
-            'timestamp': datetime.now(timezone.utc)
-        })
+        self.voice_assistant.conversation_buffer.add_turn(
+            user_text=user_text,
+            assistant_text=assistant_response,
+            language=self.voice_assistant.current_language
+            # metadata can be added here if/when needed, e.g., metadata={'source': 'start_clean'}
+        )
         
         self.voice_assistant.turn_count += 1
         
@@ -305,11 +404,12 @@ class StreamCallbackHandler:
             ))
             lang_str = f" | Lang: {lang_abbr}({voice_count}v)"
             
-            logger.info(
+            print(
                 f"📊 Turn {self.voice_assistant.turn_count}: "
                 f"AvgResp={avg_resp:.2f}s | MemOps={mem_stats['mem_ops']} | "
                 f"User='{mem_stats['user_name_cache']}'{audio_q_str}{lang_str}"
             )
+            # (Removed verbose debug prints for cleaner terminal output)
         except Exception as e:
             logger.warning(f"⚠️ Error displaying statistics: {e}")
     
@@ -324,23 +424,33 @@ class StreamCallbackHandler:
             Audio chunks for streaming back to client
         """
         additional_outputs = AdditionalOutputs()
-        tts_voices_to_try = self.voice_mapper.get_voices_for_language(
-            self.voice_assistant.current_language
-        )
+
+        # --- FIX: Always use Kokoro language code for voice selection and TTS options ---
+        from src.config.language_config import WHISPER_TO_KOKORO_LANG, KOKORO_TTS_LANG_MAP
+
+        # Map current_language to Kokoro code if needed (update in-place, as in original backup)
+        from src.config.language_config import KOKORO_VOICE_MAP
+        cur_lang = self.voice_assistant.current_language
+        if isinstance(cur_lang, str) and len(cur_lang) == 1 and cur_lang in KOKORO_VOICE_MAP:
+            kokoro_lang_code = cur_lang
+        else:
+            # Use the same conversion as the original backup
+            kokoro_lang_code = self.voice_assistant.convert_to_kokoro_language(cur_lang)
+            self.voice_assistant.current_language = kokoro_lang_code
+
+
+        tts_voices_to_try = self.voice_mapper.get_voices_for_language(self.voice_assistant.current_language)
         tts_voices_to_try.append(None)  # Fallback to default voice
-        
-        logger.info(
-            f"🎤 TTS using language '{self.voice_assistant.current_language}' "
-            f"with voices: {tts_voices_to_try[:3]}"
-        )
-        
+
+        # (Removed verbose debug prints for cleaner terminal output)
+        # (Removed verbose debug prints for cleaner terminal output)
         tts_success = False
         for voice_id in tts_voices_to_try:
             try:
                 # Configure TTS options
                 options_params = {"speed": 1.05}
                 kokoro_tts_lang = KOKORO_TTS_LANG_MAP.get(
-                    self.voice_assistant.current_language, 'en-us'
+                    self.voice_assistant.current_language, 'a'
                 )
                 options_params["lang"] = kokoro_tts_lang
                 
@@ -348,34 +458,27 @@ class StreamCallbackHandler:
                     options_params["voice"] = voice_id
                 
                 tts_options = KokoroTTSOptions(**options_params)
-                logger.info(f"🔊 Trying TTS with voice '{voice_id}', lang '{kokoro_tts_lang}'")
+                print(f"🔊 Trying TTS with voice '{voice_id}', lang '{kokoro_tts_lang}'")
                 
-                # Stream TTS audio
+                # Stream TTS audio using the same logic as the original backup
                 chunk_count = 0
                 total_samples = 0
-                
-                for tts_output_item in self.tts_engine.stream_tts_sync(response_text, tts_options):
-                    if isinstance(tts_output_item, tuple) and len(tts_output_item) == 2:
-                        current_sr, current_chunk_array = tts_output_item
-                        if isinstance(current_chunk_array, np.ndarray) and current_chunk_array.size > 0:
-                            chunk_count += 1
-                            total_samples += current_chunk_array.size
-                            
-                            # Yield smaller chunks to prevent timeouts
-                            yield from self._yield_audio_chunks(
-                                current_sr, current_chunk_array, additional_outputs
-                            )
-                    
-                    elif isinstance(tts_output_item, np.ndarray) and tts_output_item.size > 0:
+
+                for current_sr, current_chunk_array in self.voice_assistant.stream_tts_synthesis(
+                    response_text, voice_id, kokoro_lang_code
+                ):
+                    if isinstance(current_chunk_array, np.ndarray) and current_chunk_array.size > 0:
                         chunk_count += 1
-                        total_samples += tts_output_item.size
-                        
-                        yield from self._yield_audio_chunks(
-                            AUDIO_SAMPLE_RATE, tts_output_item, additional_outputs
-                        )
-                
+                        total_samples += current_chunk_array.size
+                        chunk_size = min(1024, current_chunk_array.size)
+                        for i in range(0, current_chunk_array.size, chunk_size):
+                            mini_chunk = current_chunk_array[i:i+chunk_size]
+                            if mini_chunk.size > 0:
+                                yield (current_sr, mini_chunk), additional_outputs
+
+                # (Removed verbose debug prints for cleaner terminal output)
                 tts_success = True
-                logger.info(
+                print(
                     f"✅ TTS stream completed. Voice: {voice_id}, "
                     f"Chunks: {chunk_count}, Samples: {total_samples}"
                 )
@@ -385,7 +488,7 @@ class StreamCallbackHandler:
                     lang_name = self.lang_names.get(
                         self.voice_assistant.current_language, 'Unknown'
                     )
-                    logger.info(f"✅ TTS SUCCESS using {lang_name} voice: {voice_id}")
+                    # (Removed verbose debug prints for cleaner terminal output)
                 break
                 
             except Exception as e:

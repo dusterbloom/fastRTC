@@ -58,17 +58,18 @@ class FastRTCBridge:
                 ReplyOnPause(
                     callback_function,
                     can_interrupt=True,
-                    algo_options=AlgoOptions(
-                        audio_chunk_duration=0.5,
-                        started_talking_threshold=0.15,
-                        speech_threshold=speech_threshold
+                       algo_options=AlgoOptions(
+                        # This is the GATEKEEPER. We are making it extremely sensitive.
+                        speech_threshold=0.05,  # Drastically lower: will detect even quiet speech.
+                        started_talking_threshold=0.1,
+                        audio_chunk_duration=0.5 # Process audio in smaller chunks for responsiveness
                     ),
                     model_options=SileroVadOptions(
-                        threshold=0.15,
-                        min_speech_duration_ms=100,
-                        min_silence_duration_ms=3000,
-                        speech_pad_ms=500,
-                        window_size_samples=512
+                        # This is the TIMER. We are keeping it very patient.
+                        threshold=0.2,                  # More sensitive model threshold
+                        min_speech_duration_ms=150,     # Catches very short words like "a" or "I"
+                        min_silence_duration_ms=4000,   # PATIENCE: Waits 4 seconds of pure silence
+                        speech_pad_ms=500               # Generous buffer at the end of your speech
                     )
                 ),
                 modality="audio",

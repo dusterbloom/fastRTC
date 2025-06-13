@@ -239,6 +239,7 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
                 audio_array = audio_array.astype(self.np_dtype)
             
             logger.info(f"🔧 STT Engine Debug: Audio range=[{np.min(audio_array):.6f}, {np.max(audio_array):.6f}], size={audio_array.size}")
+            logger.info(f"🔧 STT Engine Debug: Audio mean={audio_array.mean():.6f}, rms={np.sqrt(np.mean(audio_array**2)):.6f}")
             
             # Run transcription in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -320,6 +321,9 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
                         language = 'en'
                         logger.info(f"🇺🇸 Language inferred from English patterns: {language}")
             
+            logger.info(
+                f"📝 STT Result: text='{text}', language='{language}', confidence={confidence}, chunks={chunks if chunks is not None else 'N/A'}"
+            )
             return TranscriptionResult(
                 text=text,
                 language=language,
@@ -483,17 +487,23 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
         # SIMPLIFIED: Use audio array directly (no audio_to_bytes needed)
         logger.info(f"🔧 STT Debug: Using direct audio array for Whisper")
         
-        # CRITICAL FIX: Use exact same pipeline call as V4 but with optimizations
-        return self.pipeline(
+        # Reverted: Pass resampled audio_array directly to the pipeline,
+        # using the input_features keyword.
+        # This is to test if explicit feature extraction was causing the silent failure.
+        logger.info(f"🔧 STT Debug: audio_array before pipeline - shape: {audio_array.shape}, dtype: {audio_array.dtype}, min: {np.min(audio_array) if audio_array.size > 0 else 'N/A'}, max: {np.max(audio_array) if audio_array.size > 0 else 'N/A'}, mean: {np.mean(audio_array) if audio_array.size > 0 else 'N/A'}")
+        
+        pipeline_output = self.pipeline(
             audio_array,
             chunk_length_s=30,
             batch_size=1,
             generate_kwargs={
-                'task': 'transcribe',
-                'language': None,  # Let Whisper auto-detect
+                'task': 'transcribe'
             },
-            return_timestamps=False,  # KEY FIX: Match V4 exactly
+            return_timestamps=False,
         )
+        logger.info(f"🔧 STT Debug: Raw pipeline output: {pipeline_output}")
+        return pipeline_output
+
     
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the loaded model.

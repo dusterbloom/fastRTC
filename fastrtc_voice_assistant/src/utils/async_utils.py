@@ -151,8 +151,8 @@ class AsyncEnvironmentManager:
                 if assistant_instance:
                     if (hasattr(assistant_instance, 'http_session') and
                         assistant_instance.http_session and
-                        hasattr(assistant_instance, 'amem_memory') and
-                        assistant_instance.amem_memory):
+                        hasattr(assistant_instance, 'memory_manager') and
+                        assistant_instance.memory_manager):
                         
                         logger.info("✅ Async environment and components are ready")
                         return True

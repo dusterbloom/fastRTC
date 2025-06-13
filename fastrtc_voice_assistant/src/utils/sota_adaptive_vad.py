@@ -75,6 +75,13 @@ class SimpleSOTAAdaptiveVAD:
         else:
             features['snr_estimate'] = 1.0
         
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[VAD DIAG] Features: energy={features.get('energy', 0):.6f}, "
+            f"noise_floor={features.get('noise_floor', 'N/A')}, "
+            f"snr_estimate={features.get('snr_estimate', 1.0):.6f}"
+        )
         return features
     
     def update_snr_based_thresholds(self, features: Dict[str, float]):
