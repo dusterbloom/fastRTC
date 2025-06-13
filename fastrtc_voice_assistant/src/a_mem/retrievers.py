@@ -22,7 +22,7 @@ def simple_tokenize(text):
 class ChromaRetriever:
     """Vector database retrieval using ChromaDB with PERSISTENT storage"""
     def __init__(self, collection_name: str = "memories", model_name: str = "all-MiniLM-L6-v2",
-                 persist_directory: str = "./chroma_db"):
+                 persist_directory: str = "fastrtc_voice_assistant/chroma_db"):
         """Initialize ChromaDB retriever with persistent storage.
         
         Args:

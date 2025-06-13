@@ -1,6 +1,7 @@
+/models/
+fastrtc_voice_assistant/chroma_db/chroma.sqlite3
 env/
 archive/
 __pycache__/
 .vscode/
-qdrant_storage/
-chroma_db/
+fastrtc_voice_assistant/chroma_db/

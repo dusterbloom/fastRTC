@@ -1,0 +1,45 @@
+# Ignore Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+
+# Ignore git and version control
+.git/
+.gitignore
+
+# Ignore test and coverage files
+tests/
+htmlcov/
+.coverage
+.pytest_cache/
+*.log
+
+# Ignore documentation
+docs/
+fastrtc_voice_assistant/docs/
+
+# Ignore local data and models not needed in build
+chroma_db/
+models/
+data/
+logs/
+qdrant_storage/
+archive/
+
+# Ignore frontend build artifacts
+frontend/react-vite/node_modules/
+frontend/react-vite/dist/
+frontend/react-vite/.next/
+frontend/react-vite/.turbo/
+
+# Ignore Docker-related files not needed in build context
+docker-compose.yml
+Dockerfile
+
+# Ignore system files
+.DS_Store
+Thumbs.db

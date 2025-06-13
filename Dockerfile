@@ -1,3 +1,5 @@
+# NOTE: During build, outbound HTTPS access to huggingface.co is required to download models.
+# No other external network access is required by default.
 ################ 1️⃣  download CT2 model ########################
 FROM python:3.11-slim AS downloader
 RUN pip install "huggingface_hub[hf_transfer]" && mkdir /models
@@ -14,10 +16,10 @@ PY
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 ENV HUGGINGFACE_HUB_CACHE=/models
 COPY --from=downloader /models /models
-RUN apt-get update && apt-get install -y ffmpeg python3-pip \
+RUN apt-get update && apt-get install -y python3 python3-pip ffmpeg \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
-COPY fastrtc_voice_assistant/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /workspace
 COPY . .
-CMD ["python", "fastrtc_voice_assistant/start.py"]
+CMD ["python3", "fastrtc_voice_assistant/start.py"]

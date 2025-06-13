@@ -16,8 +16,6 @@ nltk
 # HTTP and async
 aiohttp
 
-# Vector database
-qdrant-client
 transformers>=4.36.2
 
 # FastRTC Whisper

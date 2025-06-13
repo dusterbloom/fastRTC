@@ -118,32 +118,9 @@ class VoiceAssistant:
         Returns:
             Configured AMemMemoryManager instance
         """
-        logger.info("🔧 Setting up memory manager with Qdrant...")
-        
+        logger.info("🔧 Setting up memory manager (Qdrant removed)...")
         # Set up dummy OpenAI key for local use
         os.environ["OPENAI_API_KEY"] = "dummy-key-for-local-use"
-        
-        # Initialize Qdrant client
-        # Parse Qdrant host and port from centralized config
-        from urllib.parse import urlparse
-        qdrant_url = getattr(config.network, "qdrant_url", "http://localhost:6333")
-        parsed = urlparse(qdrant_url)
-        qdrant_host = parsed.hostname or "localhost"
-        qdrant_port = parsed.port or 6333
-        qclient = QdrantClient(host=qdrant_host, port=qdrant_port)
-        collections_response = qclient.get_collections()
-        collection_names = [c.name for c in collections_response.collections]
-        
-        # Create collection if it doesn't exist
-        if "amem_voice_collection" in collection_names:
-            logger.info("✅ Qdrant collection 'amem_voice_collection' already exists.")
-        else:
-            logger.info("Creating Qdrant collection 'amem_voice_collection'...")
-            qclient.create_collection(
-                collection_name="amem_voice_collection",
-                vectors_config=VectorParams(size=384, distance=Distance.COSINE),
-            )
-        
         return AMemMemoryManager(self.user_id)
     
     def _log_configuration(self):

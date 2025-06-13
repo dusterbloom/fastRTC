@@ -10,7 +10,6 @@ class ServiceEndpoints:
     """Service endpoint configuration."""
     ollama: str = field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://localhost:11434"))
     lm_studio: str = field(default_factory=lambda: os.getenv("LM_STUDIO_URL", "http://192.168.1.5:1234/v1"))
-    qdrant: str = field(default_factory=lambda: os.getenv("QDRANT_URL", "http://localhost:6333"))
     redis: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
     prometheus: str = field(default_factory=lambda: os.getenv("PROMETHEUS_URL", "http://localhost:9090"))
     grafana: str = field(default_factory=lambda: os.getenv("GRAFANA_URL", "http://localhost:3000"))

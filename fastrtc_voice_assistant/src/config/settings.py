@@ -80,7 +80,6 @@ class NetworkConfig:
     # Service URLs
     ollama_url: str = field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://localhost:11434"))
     lm_studio_url: str = field(default_factory=lambda: os.getenv("LM_STUDIO_URL", "http://192.168.1.5:1234/v1"))
-    qdrant_url: str = field(default_factory=lambda: os.getenv("QDRANT_URL", "http://localhost:6333"))
     redis_url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
     # Timeout configurations
@@ -99,8 +98,8 @@ class DeploymentConfig:
     debug_mode: bool = field(default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true")
 
     # Docker-specific settings
-    chroma_db_path: str = field(default_factory=lambda: os.getenv("CHROMA_DB_PATH", "./chroma_db"))
-    models_path: str = field(default_factory=lambda: os.getenv("MODELS_PATH", "./models"))
+    chroma_db_path: str = field(default_factory=lambda: os.getenv("CHROMA_DB_PATH", "fastrtc_voice_assistant/chroma_db"))
+    models_path: str = field(default_factory=lambda: os.getenv("MODELS_PATH", "fastrtc_voice_assistant/models"))
 
     # Health check settings
     health_check_interval: float = field(default_factory=lambda: float(os.getenv("HEALTH_CHECK_INTERVAL", "30.0")))

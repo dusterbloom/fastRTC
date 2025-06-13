@@ -49,7 +49,7 @@ class MediaPipeLanguageDetector(LanguageDetector):
         Returns:
             str: Path to the model file
         """
-        model_dir = Path("models/mediapipe")
+        model_dir = Path("fastrtc_voice_assistant/models/mediapipe")
         model_dir.mkdir(parents=True, exist_ok=True)
         model_path = model_dir / "language_detector.tflite"
         

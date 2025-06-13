@@ -84,33 +84,6 @@ async def initialize_voice_assistant():
         
         logger.info("✅ Voice Assistant initialization complete")
 
-        # --- FORCED TTS TEST: Synthesize a test phrase at startup to validate TTS engine ---
-        try:
-            from src.config.language_config import KOKORO_TTS_LANG_MAP
-            kokoro_lang = 'a'
-            test_voice = 'af_heart'
-            test_text = "This is a test of the TTS engine at startup."
-            tts_lang = KOKORO_TTS_LANG_MAP.get(kokoro_lang, 'en-us')
-            from src.audio.engines.tts.kokoro_tts import KokoroTTSOptions
-            tts_options = KokoroTTSOptions(voice=test_voice, speed=1.05, lang=tts_lang)
-            logger.critical(f"[TTS STARTUP TEST] Attempting TTS with voice='{test_voice}', lang='{tts_lang}'")
-            chunk_count = 0
-            total_samples = 0
-            for tts_output_item in voice_assistant.tts_engine.stream_tts_sync(test_text, tts_options):
-                if isinstance(tts_output_item, tuple) and len(tts_output_item) == 2:
-                    sample_rate, audio_array = tts_output_item
-                    if hasattr(audio_array, "size") and audio_array.size > 0:
-                        chunk_count += 1
-                        total_samples += audio_array.size
-                elif hasattr(tts_output_item, "size") and tts_output_item.size > 0:
-                    chunk_count += 1
-                    total_samples += tts_output_item.size
-            if chunk_count == 0:
-                logger.critical("[TTS STARTUP TEST] ❌ No audio chunks produced by TTS engine at startup.")
-            else:
-                logger.critical(f"[TTS STARTUP TEST] ✅ Audio produced: {chunk_count} chunks, {total_samples} samples.")
-        except Exception as e:
-            logger.critical(f"[TTS STARTUP TEST] Exception during forced TTS test: {e}")
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize voice assistant: {e}")

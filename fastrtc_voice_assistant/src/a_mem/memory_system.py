@@ -133,7 +133,7 @@ class AgenticMemorySystem:
         self.retriever = ChromaRetriever(
             collection_name="memories",
             model_name=self.model_name,
-            persist_directory="./chroma_db"  # This will persist!
+            persist_directory="fastrtc_voice_assistant/chroma_db"  # This will persist!
         )
         
         # Load existing memories from ChromaDB into self.memories

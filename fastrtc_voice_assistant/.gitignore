@@ -3,5 +3,5 @@ venv/
 __pycache__/
 .github/
 htmlcov/
-chroma_db/
-chroma_db/chroma.sqlite3
+chroma_db/*
+models/*
