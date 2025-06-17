@@ -12,19 +12,21 @@ services:
     ports:
       - "8080:8080"
       - "8443:8443"
+    networks:
+      - fastrtc_net
     volumes:
-      - ./config:/app/config
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./chroma_db:/app/chroma_db
-      - ./models:/app/models
+      - config:/workspace/config
+      - data:/workspace/data
+      - logs:/workspace/logs
+      - chroma_db:/workspace/chroma_db
+      - models:/workspace/models
     environment:
       - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-      - CHROMA_DB_PATH=/app/chroma_db
+      - LOG_LEVEL=DEBUG
+      - ALLOW_ORIGINS=http://localhost:3005,http://frontend:3005
+      - CHROMA_DB_PATH=/workspace/chroma_db
       - STT_BACKEND=faster
       - CUDA_VISIBLE_DEVICES=0
-    restart: unless-stopped
     deploy:
       resources:
         reservations:
@@ -38,13 +40,27 @@ services:
     build:
       context: ./frontend/react-vite
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend/react-vite:/app
+    networks:
+      - fastrtc_net
     environment:
       - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://voice-assistant:8080
+      - NEXT_PUBLIC_DOCKER=true
+    ports:
+      - "3005:3005"
+
+
+  # --- Redis (Required for caching/memory system) ---
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - fastrtc_net
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
+    command: redis-server --appendonly yes
 
 
 
@@ -54,6 +70,8 @@ services:
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
+    networks:
+      - fastrtc_net
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -73,6 +91,8 @@ services:
     image: prom/prometheus:latest
     ports:
       - "9090:9090"
+    networks:
+      - fastrtc_net
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -91,6 +111,8 @@ services:
     image: grafana/grafana:latest
     ports:
       - "4000:3000"
+    networks:
+      - fastrtc_net
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
@@ -110,6 +132,8 @@ services:
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
+    networks:
+      - fastrtc_net
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     restart: unless-stopped
@@ -119,3 +143,13 @@ volumes:
   prometheus_data:
   grafana_data:
   elasticsearch_data:
+  redis_data:
+  config:
+  data:
+  logs:
+  chroma_db:
+  models:
+
+networks:
+  fastrtc_net:
+    driver: bridge

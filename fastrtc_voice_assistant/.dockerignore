@@ -1,0 +1,27 @@
+# Dockerfile ignore patterns for faster builds
+.git
+.gitignore
+*.md
+docs/
+tests/
+.env*
+.coverage
+pytest.ini
+.pre-commit-config.yaml
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+node_modules/
+*.log
+*.tmp
+*.swp
+*.bak
+.DS_Store
+Thumbs.db

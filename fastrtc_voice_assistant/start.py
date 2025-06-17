@@ -381,8 +381,8 @@ app = FastAPI(title="FastRTC Voice Assistant", version="1.0.0")
 # CORS so the React/Vite front-end can hit the endpoints
 origins = [
     "http://localhost:5173",               # Original Vite dev-server port
-    "http://localhost:3001",               # Next.js dev-server port from screenshot
-    "http://127.0.0.1:3001",             # Explicit IP for Next.js dev-server
+    "http://localhost:3005",               # Next.js dev-server port from screenshot
+    "http://127.0.0.1:3005",             # Explicit IP for Next.js dev-server
     os.getenv("FRONTEND_URL", ""),         # prod domain, if set
 ]
 app.add_middleware(

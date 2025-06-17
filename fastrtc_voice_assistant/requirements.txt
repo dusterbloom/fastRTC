@@ -24,8 +24,10 @@ fastrtc-whisper-cpp
 # Faster-whisper dependencies (CTranslate2 backend)
 faster-whisper>=1.1           # CTranslate2 backend, streaming API
 ctranslate2>=4.2.0            # INT8/FP16 kernels, FlashAttn optional
-huggingface_hub[hf_transfer]>=0.25  # Rust downloader for model layer
+huggingface_hub>=0.25         # HuggingFace model hub
+hf_transfer                   # Rust-based fast downloader (optional)
 
 # Development and testing
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
+ollama

@@ -1,3 +1,6 @@
+import { getApiUrl } from "@/utils/getApiUrl";
+
+
 interface WebRTCClientOptions {
     onConnected?: () => void;
     onDisconnected?: () => void;
@@ -6,6 +9,7 @@ interface WebRTCClientOptions {
     onAudioLevel?: (level: number) => void;
     audioInputDeviceId?: string;
     audioOutputDeviceId?: string;
+    apiBaseUrl?: string;
 }
 
 export class WebRTCClient {
@@ -19,11 +23,18 @@ export class WebRTCClient {
     private animationFrameId: number | null = null;
     private currentInputDeviceId: string | undefined = undefined;
     private currentOutputDeviceId: string | undefined = undefined;
+    private apiBaseUrl: string;
 
     constructor(options: WebRTCClientOptions = {}) {
         this.options = options;
         this.currentInputDeviceId = options.audioInputDeviceId;
         this.currentOutputDeviceId = options.audioOutputDeviceId;
+        
+        // Environment-aware API base URL
+        // Priority: explicit option > environment variable > local development default
+        this.apiBaseUrl = options.apiBaseUrl ||
+            getApiUrl() || // Fallback to utility function
+            process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"; // Default to local development URL
     }
 
     // Method to change audio input device
@@ -115,7 +126,7 @@ export class WebRTCClient {
             await this.peerConnection.setLocalDescription(offer);
             
             // Use same-origin request to avoid CORS preflight
-            const response = await fetch('http://localhost:8000/assistant/webrtc/offer', {
+            const response = await fetch(`${this.apiBaseUrl}/assistant/webrtc/offer`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
