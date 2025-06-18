@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  coturn:
+    image: instrumentisto/coturn
+    container_name: coturn
+    ports:
+      - "3478:3478"   # Default port for STUN/TURN
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"  # Port range for TURN
+    environment:
+      - EXTERNAL_IP=auto  # Automatically detect external IP
+      - LISTENING_PORT=3478
+      - MIN_PORT=49160
+      - MAX_PORT=49200
+      - USE_AUTH_SECRET=true
+      - STATIC_AUTH_SECRET=your_static_auth_secret
+      - CERT_FILE=/etc/ssl/certs/your_cert.pem
+      - PKEY_FILE=/etc/ssl/private/your_key.pem
+    volumes:
+      - ./certs:/etc/ssl  # Mount the directory containing SSL certificates
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fastrtc-backend
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - EXTERNAL_IP=${EXTERNAL_IP}
+      - STUN_SERVERS=${STUN_SERVERS:-stun:${EXTERNAL_IP}:3478}
+      - TURN_SERVERS=${TURN_SERVERS:-turn:${EXTERNAL_IP}:3478}
+      - TURN_AUTH_SECRET=${TURN_AUTH_SECRET}
+      - WEBRTC_MEDIA_PORT_FROM=31001
+      - WEBRTC_MEDIA_PORT_TO=40000
+    volumes:
+      - hf_cache:/root/.cache/huggingface/hub
+      - ./backend/chroma_db:/app/backend/chroma_db
+      - ./docker/webrtc:/app/config/webrtc:ro
+    depends_on:
+      - coturn
+
+  frontend:
+    build:
+      context: ./frontend/react-vite
+      dockerfile: Dockerfile
+    container_name: fastrtc-frontend
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://${EXTERNAL_IP:-localhost}:8000
+      - NEXT_PUBLIC_STUN_SERVERS=${STUN_SERVERS:-stun:${EXTERNAL_IP}:3478}
+      - NEXT_PUBLIC_TURN_SERVERS=${TURN_SERVERS:-turn:${EXTERNAL_IP}:3478}
+    depends_on:
+      - backend
+
+volumes:
+  hf_cache:
+  coturn-data:
+  coturn-logs:

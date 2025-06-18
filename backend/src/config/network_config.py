@@ -60,3 +60,9 @@ class HTTPClientConfig:
             limit_per_host=self.max_connections_per_host,
             ssl=self.enable_ssl
         )
+    
+    @dataclass
+    class WebRTCConfig:
+        """WebRTC configuration for ICE servers and media ports."""
+        ice_servers: str = field(default_factory=lambda: os.getenv("ICE_SERVERS", "stun:stun.l.google.com:19302"))
+        media_ports: str = field(default_factory=lambda: os.getenv("MEDIA_PORTS", "50000-60000"))

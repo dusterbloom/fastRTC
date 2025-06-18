@@ -51,7 +51,16 @@ export class WebRTCClient {
 
     async connect() {
         try {
-            this.peerConnection = new RTCPeerConnection();
+            this.peerConnection = new RTCPeerConnection({
+                iceServers: [
+                    { urls: process.env.NEXT_PUBLIC_STUN_SERVERS?.split(',') || [] },
+                    {
+                        urls: process.env.NEXT_PUBLIC_TURN_SERVERS?.split(',') || [],
+                        username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+                        credential: process.env.NEXT_PUBLIC_TURN_PASSWORD
+                    }
+                ]
+            });
             
             // Get user media with specific device if specified
             try {
@@ -115,7 +124,7 @@ export class WebRTCClient {
             await this.peerConnection.setLocalDescription(offer);
             
             // Use same-origin request to avoid CORS preflight
-            const response = await fetch('http://localhost:8000/assistant/webrtc/offer', {
+            const response = await fetch(process.env.NEXT_PUBLIC_WEBRTC_API_URL || 'http://localhost:8000/assistant/webrtc/offer', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',

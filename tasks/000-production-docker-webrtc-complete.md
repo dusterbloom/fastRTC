@@ -41,12 +41,10 @@ services:
       - coturn-data:/var/lib/coturn
       - coturn-logs:/var/log
     # UNCERTAINTY: Port range conflicts on shared hosts
-    # ports:
-    #   - "3478:3478"          # STUN/TURN
-    #   - "3478:3478/udp"      
-    #   - "5349:5349"          # TURNS (TLS)
-    #   - "5349:5349/udp"      
-    #   - "49152-65535:49152-65535/udp"  # RTP relay range
+    ports:
+      - "3478:3478"   # Default port for STUN/TURN
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"  # Port range for TURN
 
   # FastRTC backend with WebRTC configuration
   backend:
@@ -104,18 +102,18 @@ volumes:
 # UNCERTAINTY: These values must be configured per deployment environment
 
 # External server IP - REQUIRED
-EXTERNAL_IP=YOUR_SERVER_PUBLIC_IP
+EXTERNAL_IP=auto  # Automatically detect external IP
 
 # TURN authentication secret - Generate once and keep secure
-TURN_AUTH_SECRET=GENERATE_WITH_openssl_rand_hex_16
+TURN_AUTH_SECRET=your_static_auth_secret
 
 # ICE server configuration - UNCERTAINTY: Geographic optimization needed
 STUN_SERVERS=stun:YOUR_SERVER_PUBLIC_IP:3478
 TURN_SERVERS=turn:YOUR_SERVER_PUBLIC_IP:3478
 
 # SSL certificate paths for TURNS (optional but recommended for production)
-# SSL_CERT_PATH=/path/to/cert.pem
-# SSL_KEY_PATH=/path/to/key.pem
+SSL_CERT_PATH=/etc/ssl/certs/your_cert.pem
+SSL_KEY_PATH=/etc/ssl/private/your_key.pem
 ```
 
 ```ini
@@ -271,6 +269,9 @@ async def create_fastrtc_stream():
     return stream
 ```
 
+
+## 4. Docker files
+
 ```dockerfile
 # Dockerfile.backend (project root) - Backend container with WebRTC support
 FROM python:3.11-slim
@@ -324,6 +325,7 @@ EXPOSE 3000
 CMD ["npm", "start"]
 ```
 
+## 5. Deployment script
 ```bash
 # scripts/deploy.sh (new file) - Production deployment script
 #!/bin/bash
