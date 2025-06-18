@@ -1,7 +1,7 @@
 /models/
-fastrtc_voice_assistant/chroma_db/chroma.sqlite3
+backend/chroma_db/chroma.sqlite3
 env/
 archive/
 __pycache__/
 .vscode/
-fastrtc_voice_assistant/chroma_db/
+backend/chroma_db/

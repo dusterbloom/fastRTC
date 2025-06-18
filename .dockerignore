@@ -20,7 +20,7 @@ htmlcov/
 
 # Ignore documentation
 docs/
-fastrtc_voice_assistant/docs/
+backend/docs/
 
 # Ignore local data and models not needed in build
 chroma_db/

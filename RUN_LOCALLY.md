@@ -6,7 +6,7 @@ You can run and compare both STT backends locally without Docker!
 
 ### 1. Install Dependencies
 ```bash
-cd fastrtc_voice_assistant
+cd backend
 pip install -r requirements.txt
 ```
 
