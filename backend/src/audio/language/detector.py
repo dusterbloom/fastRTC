@@ -299,20 +299,27 @@ class HybridLanguageDetector(LanguageDetector):
         Returns:
             Tuple[str, float]: (language_code, confidence_score)
         """
+        print(f"[HYBRID DETECT] Input text: '{text}' (length: {len(text)})")
         if not text or not text.strip():
+            print(f"[HYBRID DETECT] Empty text, returning default language")
             return DEFAULT_LANGUAGE, 0.0
         
+        print(f"[HYBRID DETECT] MediaPipe available: {self.mediapipe_detector.is_available()}")
         # Try MediaPipe first if available
         if self.mediapipe_detector.is_available():
             lang_code, confidence = self.mediapipe_detector.detect_language(text)
+            print(f"[HYBRID DETECT] MediaPipe result: {lang_code}, confidence: {confidence}")
             
             if confidence >= self.confidence_threshold:
                 logger.info(f"🎯 MediaPipe detection: {lang_code} (confidence: {confidence:.3f})")
+                print(f"[HYBRID DETECT] Using MediaPipe result (confidence {confidence} >= threshold {self.confidence_threshold})")
                 return lang_code, confidence
             else:
                 logger.info(f"🔄 MediaPipe confidence too low ({confidence:.3f}), trying keyword fallback")
+                print(f"[HYBRID DETECT] MediaPipe confidence too low ({confidence} < {self.confidence_threshold}), trying keyword fallback")
         else:
             logger.info("🔄 MediaPipe not available, using keyword detection")
+            print(f"[HYBRID DETECT] MediaPipe not available, using keyword detection")
         
         # Fall back to keyword detection
         lang_code, confidence = self.keyword_detector.detect_language(text)

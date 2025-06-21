@@ -21,6 +21,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
 # Make local packages importable
@@ -32,10 +33,12 @@ from src.integration.callback_handler import StreamCallbackHandler
 from src.utils.async_utils import AsyncEnvironmentManager
 from src.config.settings import load_config
 from src.utils.logging import get_logger, setup_logging
+from src.utils.process_killer import force_kill_after_timeout, setup_signal_handlers, kill_child_processes
 
 # Initial setup
 setup_logging()
 logger = get_logger(__name__)
+setup_signal_handlers()  # Set up Ctrl+C and kill signal handlers
 #logger.critical("🚨 TOP LEVEL LOGGER TEST IN START_CLEAN.PY 🚨") # New test log
 
 # Global components
@@ -75,7 +78,6 @@ async def initialize_voice_assistant():
             voice_assistant=voice_assistant,
             stt_engine=voice_assistant.stt_engine,
             tts_engine=voice_assistant.tts_engine,
-            language_detector=voice_assistant.language_detector,
             voice_mapper=voice_assistant.voice_mapper,
             event_loop=async_env_manager.get_event_loop()
         )
@@ -154,16 +156,24 @@ async def shutdown_event():
     try:
         logger.info("🛑 Shutting down voice assistant...")
         
+        # Start force-kill timer (KISS principle: just kill everything after timeout)
+        force_kill_after_timeout(timeout_seconds=3.0)
+        
         if fastrtc_bridge:
             fastrtc_bridge.stop_stream()
             
         if async_env_manager:
-            async_env_manager.shutdown(timeout=10)
+            async_env_manager.shutdown(timeout=2)  # Reduced timeout
+            
+        # Kill any child processes
+        kill_child_processes()
             
         logger.info("👋 Voice assistant shutdown complete")
         
     except Exception as e:
         logger.error(f"❌ Error during shutdown: {e}")
+        # Force kill immediately on error
+        force_kill_after_timeout(timeout_seconds=1.0)
 
 @app.get("/")
 async def root():
@@ -173,6 +183,32 @@ async def root():
         "status": "healthy",
         "version": "1.0.0"
     }
+
+class LanguageRequest(BaseModel):
+    language: str
+
+@app.post("/api/set-language")
+async def set_language(request: LanguageRequest):
+    """Set the voice assistant language."""
+    try:
+        if not voice_assistant:
+            return {"status": "error", "message": "Voice assistant not initialized"}
+        
+        # Validate language code
+        valid_languages = ['a', 'b', 'e', 'i', 'f', 'p', 'j', 'z', 'h']
+        if request.language not in valid_languages:
+            return {"status": "error", "message": f"Invalid language code: {request.language}"}
+        
+        # Set the language
+        voice_assistant.current_language = request.language
+        
+        return {
+            "status": "success", 
+            "message": f"Language set to {request.language}",
+            "language": request.language
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/health")
 async def health_check():

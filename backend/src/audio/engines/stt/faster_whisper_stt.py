@@ -21,26 +21,63 @@ class FasterWhisperSTT(BaseSTTEngine):
     """
 
     def __init__(self):
+        import os
+        import site
         super().__init__()
+        
+        # Set LD_LIBRARY_PATH for NVIDIA libraries
         try:
-            # Check if model directory exists (for local development)
-            if not _MODEL_DIR.exists():
+            site_packages = site.getsitepackages()[0]
+            cublas_lib = os.path.join(site_packages, "nvidia", "cublas", "lib")
+            cudnn_lib = os.path.join(site_packages, "nvidia", "cudnn", "lib")
+            
+            current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+            new_ld_path = f"{cublas_lib}:{cudnn_lib}"
+            if current_ld_path:
+                new_ld_path = f"{new_ld_path}:{current_ld_path}"
+            
+            os.environ['LD_LIBRARY_PATH'] = new_ld_path
+            logger.info(f"Set LD_LIBRARY_PATH for NVIDIA libraries: {new_ld_path}")
+        except Exception as e:
+            logger.warning(f"Could not set NVIDIA library path: {e}")
+        
+        try:
+            # Allow model path override via environment variable
+            env_model_path = os.environ.get("FASTER_WHISPER_MODEL_PATH")
+            if env_model_path:
+                model_path = env_model_path
+                logger.info(f"Using model path from FASTER_WHISPER_MODEL_PATH: {model_path}")
+            elif not _MODEL_DIR.exists():
                 # Try alternative path for development
                 dev_model_dir = Path("./models/whisper-v3-ct2")
                 if dev_model_dir.exists():
                     model_path = str(dev_model_dir)
+                    logger.info(f"Using development model path: {model_path}")
                 else:
                     # Fall back to downloading if not available
                     model_path = "large-v3"
                     logger.warning("Model directory not found, will download on first use")
             else:
                 model_path = str(_MODEL_DIR)
+                logger.info(f"Using default model path: {model_path}")
             
-            self.model = WhisperModel(
-                model_path,
-                device="cuda",
-                compute_type=_COMPUTE,
-            )
+            # Try GPU first, fallback to CPU if it fails
+            try:
+                self.model = WhisperModel(
+                    model_path,
+                    device="cuda",
+                    compute_type=_COMPUTE,
+                )
+                logger.info("✅ FasterWhisperSTT initialized with GPU acceleration")
+            except Exception as gpu_error:
+                logger.warning(f"GPU initialization failed: {gpu_error}")
+                logger.info("🔄 Falling back to CPU mode...")
+                self.model = WhisperModel(
+                    model_path,
+                    device="cpu",
+                    compute_type="int8",
+                )
+                logger.info("✅ FasterWhisperSTT initialized with CPU mode")
             
             # Verify multilingual model
             if hasattr(self.model, 'hf_tokenizer') and hasattr(self.model.hf_tokenizer, 'lang_to_id'):

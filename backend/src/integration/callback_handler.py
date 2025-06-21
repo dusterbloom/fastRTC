@@ -13,7 +13,7 @@ from typing import Tuple, Generator, Any, Optional
 from fastrtc import AdditionalOutputs
 
 from ..core.interfaces import TranscriptionResult # Added import
-from ..audio import HuggingFaceSTTEngine, KokoroTTSEngine, HybridLanguageDetector, VoiceMapper
+from ..audio import STTEngine, KokoroTTSEngine, VoiceMapper
 from ..audio.engines.tts.kokoro_tts import KokoroTTSOptions
 from ..utils.async_utils import run_coro_from_sync_thread_with_timeout
 from ..utils.logging import get_logger
@@ -38,9 +38,8 @@ class StreamCallbackHandler:
     def __init__(
         self,
         voice_assistant,
-        stt_engine: HuggingFaceSTTEngine,
+        stt_engine: STTEngine,
         tts_engine: KokoroTTSEngine,
-        language_detector: HybridLanguageDetector,
         voice_mapper: VoiceMapper,
         event_loop=None,
         adaptive_vad: Optional[SimpleSOTAAdaptiveVAD] = None # Added parameter
@@ -60,7 +59,6 @@ class StreamCallbackHandler:
         self.voice_assistant = voice_assistant
         self.stt_engine = stt_engine
         self.tts_engine = tts_engine
-        self.language_detector = language_detector
         self.voice_mapper = voice_mapper
         self.event_loop = event_loop
         self.adaptive_vad = adaptive_vad or SimpleSOTAAdaptiveVAD(VADConfig()) # Added initialization
@@ -181,15 +179,12 @@ class StreamCallbackHandler:
             
             # (Removed verbose debug prints for cleaner terminal output)
             # Perform speech-to-text conversion
-            user_text, detected_language = self._process_speech_to_text(audio_array, sample_rate)
+            user_text = self._process_speech_to_text(audio_array, sample_rate)
             # (Removed verbose debug prints for cleaner terminal output)
             
             if not user_text.strip():
                 yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
                 return
-            
-            # Update language if changed
-            self._update_language(detected_language)
             
             # Update statistics
             self.voice_assistant.voice_detection_successes += 1
@@ -213,26 +208,23 @@ class StreamCallbackHandler:
             # Graceful error recovery
             yield from self._handle_error_recovery()
     
-    def _process_speech_to_text(self, audio_array: np.ndarray, sample_rate: int) -> Tuple[str, str]:
+    def _process_speech_to_text(self, audio_array: np.ndarray, sample_rate: int) -> str:
         """
-        Process audio array to extract text and detect language.
+        Process audio array to extract text.
         
         Args:
             audio_array: Audio data as numpy array
             sample_rate: Audio sample rate
             
         Returns:
-            Tuple of (transcribed_text, detected_language)
+            Transcribed text
         """
         # Perform transcription using the method that accepts audio_array and sample_rate
         # and is designed to handle Hugging Face pipeline parameters.
         # No need for audio_bytes conversion here as transcribe_with_sample_rate takes array.
         try:
             transcription_result = run_coro_from_sync_thread_with_timeout(
-                self.stt_engine.transcribe_with_sample_rate(
-                    audio_array=audio_array,
-                    sample_rate=sample_rate
-                ),
+                self.stt_engine._transcribe_audio(audio_array),
                 timeout=8.0, # Consistent with start_original_backup.py
                 event_loop=self.event_loop
             )
@@ -245,54 +237,14 @@ class StreamCallbackHandler:
 
         # outputs is now a TranscriptionResult object
         user_text = transcription_result.text.strip() if transcription_result and hasattr(transcription_result, 'text') else ""
+        print(f"[STT DEBUG] Transcription result: {transcription_result}")
+        print(f"[STT DEBUG] Has text attribute: {hasattr(transcription_result, 'text') if transcription_result else False}")
+        print(f"[STT DEBUG] Raw text: '{transcription_result.text if transcription_result and hasattr(transcription_result, 'text') else 'NO TEXT'}'")
+        print(f"[STT DEBUG] Final user_text: '{user_text}' (length: {len(user_text)})")
         # (Removed verbose debug prints for cleaner terminal output)
         
-        # Detect language using multiple methods
-        # Pass transcription_result directly (it's an Optional[TranscriptionResult])
-        detected_language = self._detect_language_multi_method(transcription_result, user_text)
-        
-        return user_text, detected_language
+        return user_text
     
-    def _detect_language_multi_method(self, stt_outputs: Optional[TranscriptionResult], user_text: str) -> str:
-        """
-        Detect language using multiple detection methods for accuracy.
-        
-        Args:
-            stt_outputs: Outputs from STT engine (TranscriptionResult object or None)
-            user_text: Transcribed text
-            
-        Returns:
-            Detected language code
-        """
-        # Method 1: Check if Whisper provided language info
-        whisper_language = 'en'  # Default
-        
-        if stt_outputs: # Check if stt_outputs is not None
-            if hasattr(stt_outputs, 'language') and stt_outputs.language:
-                whisper_language = stt_outputs.language
-                # (Removed verbose debug prints for cleaner terminal output)
-            elif hasattr(stt_outputs, 'chunks') and stt_outputs.chunks:
-                for chunk in stt_outputs.chunks:
-                    # Assuming chunks are dicts as per HuggingFaceSTTEngine structure
-                    if isinstance(chunk, dict) and 'language' in chunk:
-                        whisper_language = chunk['language']
-                        # (Removed verbose debug prints for cleaner terminal output)
-                        break
-        
-        # Method 2: Text-based detection (primary method)
-        # This part remains unchanged as it primarily uses user_text
-        text_detected_lang, confidence = self.language_detector.detect_language(user_text)
-        
-        # Method 3: Combine detections with priority to text detection
-        if text_detected_lang != 'a':  # If text detection found non-English
-            detected_language = text_detected_lang
-            # (Removed verbose debug prints for cleaner terminal output)
-        else:
-            # Fall back to Whisper detection
-            detected_language = self._get_kokoro_language(whisper_language)
-            # (Removed verbose debug prints for cleaner terminal output)
-        
-        return detected_language
     
     def _get_kokoro_language(self, whisper_lang: str) -> str:
         """
@@ -317,20 +269,6 @@ class StreamCallbackHandler:
         }
         return whisper_to_kokoro.get(whisper_lang, 'a')  # Default to English
     
-    def _update_language(self, detected_language: str):
-        """
-        Update the current language if it has changed.
-        
-        Args:
-            detected_language: The detected language code
-        """
-        if detected_language != self.voice_assistant.current_language:
-            self.voice_assistant.current_language = detected_language
-            lang_name = self.lang_names.get(detected_language, 'Unknown')
-            # (Removed verbose debug prints for cleaner terminal output)
-        else:
-            lang_name = self.lang_names.get(detected_language, 'Unknown')
-            # (Removed verbose debug prints for cleaner terminal output)
     
     def _generate_response(self, user_text: str) -> str:
         """
@@ -438,12 +376,20 @@ class StreamCallbackHandler:
             kokoro_lang_code = self.voice_assistant.convert_to_kokoro_language(cur_lang)
             self.voice_assistant.current_language = kokoro_lang_code
 
+        # LOG: Show current language and mapped Kokoro code
+        print(f"[TTS] Preparing TTS for language '{cur_lang}' mapped to Kokoro code '{kokoro_lang_code}'")
+        print(f"[TTS] Final current_language after mapping: '{self.voice_assistant.current_language}'")
 
         tts_voices_to_try = self.voice_mapper.get_voices_for_language(self.voice_assistant.current_language)
+        print(f"[TTS] Available voices for language '{self.voice_assistant.current_language}': {tts_voices_to_try}")
+        
+        # Debug: Show voice mapping configuration
+        from src.config.language_config import KOKORO_VOICE_MAP
+        print(f"[TTS] Voice map for all languages: {KOKORO_VOICE_MAP}")
+        expected_voices = KOKORO_VOICE_MAP.get(self.voice_assistant.current_language, [])
+        print(f"[TTS] Expected voices for '{self.voice_assistant.current_language}': {expected_voices}")
         tts_voices_to_try.append(None)  # Fallback to default voice
 
-        # (Removed verbose debug prints for cleaner terminal output)
-        # (Removed verbose debug prints for cleaner terminal output)
         tts_success = False
         for voice_id in tts_voices_to_try:
             try:
@@ -456,6 +402,8 @@ class StreamCallbackHandler:
                 
                 if voice_id:
                     options_params["voice"] = voice_id
+
+                print(f"[TTS] Attempting TTS with lang='{kokoro_tts_lang}', voice='{voice_id}', options={options_params}")
                 
                 tts_options = KokoroTTSOptions(**options_params)
                 print(f"🔊 Trying TTS with voice '{voice_id}', lang '{kokoro_tts_lang}'")
@@ -476,19 +424,18 @@ class StreamCallbackHandler:
                             if mini_chunk.size > 0:
                                 yield (current_sr, mini_chunk), additional_outputs
 
-                # (Removed verbose debug prints for cleaner terminal output)
                 tts_success = True
                 print(
                     f"✅ TTS stream completed. Voice: {voice_id}, "
                     f"Chunks: {chunk_count}, Samples: {total_samples}"
                 )
+                print(f"[TTS] TTS stream completed. Voice: {voice_id}, Chunks: {chunk_count}, Samples: {total_samples}")
                 
                 # Success message with language confirmation
                 if self.voice_assistant.current_language != 'a' and voice_id:
                     lang_name = self.lang_names.get(
                         self.voice_assistant.current_language, 'Unknown'
                     )
-                    # (Removed verbose debug prints for cleaner terminal output)
                 break
                 
             except Exception as e:

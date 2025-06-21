@@ -107,9 +107,20 @@ class AMemMemoryManager(MemoryManager):
             except asyncio.CancelledError:
                 logger.info("Background A-MEM processor task was cancelled.")
                 break
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e) or "no running event loop" in str(e):
+                    logger.info("Background A-MEM processor stopping due to closed event loop.")
+                    break
+                logger.error(f"❌ Runtime error in A-MEM queue processing loop: {e}")
+                break
             except Exception as e:
                 logger.error(f"❌ Unexpected error in A-MEM queue processing loop: {e}")
-                await asyncio.sleep(1)
+                try:
+                    await asyncio.sleep(1)
+                except RuntimeError:
+                    # Event loop is closed, stop processing
+                    logger.info("Background A-MEM processor stopping due to closed event loop.")
+                    break
     
     def _parse_timestamp(self, timestamp_str: Optional[str]) -> datetime:
         """Parse timestamp string to datetime object.

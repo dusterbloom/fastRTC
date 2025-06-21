@@ -5,14 +5,14 @@ and language detection capabilities.
 """
 
 from .processors.bluetooth_processor import BluetoothAudioProcessor
-from .engines.stt.huggingface_stt import HuggingFaceSTTEngine
+from .engines.stt import STTEngine
 from .engines.tts.kokoro_tts import KokoroTTSEngine
 from .language.detector import HybridLanguageDetector, MediaPipeLanguageDetector, KeywordLanguageDetector
 from .language.voice_mapper import VoiceMapper
 
 __all__ = [
     'BluetoothAudioProcessor',
-    'HuggingFaceSTTEngine', 
+    'STTEngine', 
     'KokoroTTSEngine',
     'HybridLanguageDetector',
     'MediaPipeLanguageDetector',

@@ -253,6 +253,15 @@ class HuggingFaceSTTEngine(BaseSTTEngine):
             # Extract transcription text
             text = outputs.get("text", "").strip()
             logger.info(f"📝 Transcribed: '{text}'")
+            logger.info(f"🔍 Raw pipeline outputs: {outputs}")
+            if not text:
+                logger.warning(
+                    f"[STT WARNING] Empty transcript returned! "
+                    f"Audio stats: shape={audio_array.shape}, dtype={audio_array.dtype}, "
+                    f"min={np.min(audio_array):.6f}, max={np.max(audio_array):.6f}, "
+                    f"mean={audio_array.mean():.6f}, rms={np.sqrt(np.mean(audio_array**2)):.6f}, "
+                    f"Pipeline outputs: {outputs}"
+                )
             
             # Enhanced language detection using debug_audio_pipeline.py logic
             language = None

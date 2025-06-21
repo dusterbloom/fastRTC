@@ -17,13 +17,13 @@ from .interfaces import AudioData
 
 
 from ..audio import (
-    BluetoothAudioProcessor, HuggingFaceSTTEngine, KokoroTTSEngine,
-    HybridLanguageDetector, VoiceMapper
+    BluetoothAudioProcessor, STTEngine, KokoroTTSEngine,
+    VoiceMapper
 )
 from ..memory import AMemMemoryManager, ResponseCache, ConversationBuffer
 from ..services import LLMService, AsyncManager
 from src.config.settings import load_config
-from ..config.language_config import LANGUAGE_NAMES, WHISPER_TO_KOKORO_LANG
+from ..config.language_config import LANGUAGE_NAMES, WHISPER_TO_KOKORO_LANG, DEFAULT_LANGUAGE
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -45,9 +45,8 @@ class VoiceAssistant:
     def __init__(
         self,
         audio_processor: Optional[BluetoothAudioProcessor] = None,
-        stt_engine: Optional[HuggingFaceSTTEngine] = None,
+        stt_engine: Optional[STTEngine] = None,
         tts_engine: Optional[KokoroTTSEngine] = None,
-        language_detector: Optional[HybridLanguageDetector] = None,
         voice_mapper: Optional[VoiceMapper] = None,
         memory_manager: Optional[AMemMemoryManager] = None,
         response_cache: Optional[ResponseCache] = None,
@@ -83,9 +82,8 @@ class VoiceAssistant:
 
         # Initialize or use provided components
         self.audio_processor = audio_processor or BluetoothAudioProcessor()
-        self.stt_engine = stt_engine or HuggingFaceSTTEngine()
+        self.stt_engine = stt_engine or STTEngine()
         self.tts_engine = tts_engine or KokoroTTSEngine()
-        self.language_detector = language_detector or HybridLanguageDetector()
         self.voice_mapper = voice_mapper or VoiceMapper()
         self.response_cache = response_cache or ResponseCache()
         self.conversation_buffer = conversation_buffer or ConversationBuffer()
@@ -96,7 +94,8 @@ class VoiceAssistant:
         self.memory_manager = memory_manager or self._setup_memory_manager()
 
         # Conversation state
-        self.current_language = self.config.audio.get("default_language", "en") if hasattr(self.config.audio, "get") else getattr(self.config.audio, "default_language", "en")
+        config_default_lang = self.config.audio.get("default_language", "en") if hasattr(self.config.audio, "get") else getattr(self.config.audio, "default_language", "en")
+        self.current_language = self.convert_to_kokoro_language(config_default_lang)
         self.turn_count = 0
         self.voice_detection_successes = 0
         self.total_response_time = deque(maxlen=20)
@@ -130,7 +129,7 @@ class VoiceAssistant:
             logger.info(f"🗣️ Conversational LLM: LM Studio ({config.llm.lm_studio_model} via {config.llm.lm_studio_url})")
         
         logger.info(f"🧠 A-MEM System: {config.memory.llm_model} with {config.memory.embedder_model} embeddings")
-        logger.info(f"🎤 STT System: Hugging Face Transformers (Model: {config.audio.hf_model_id})")
+        logger.info("🎤 STT System: Faster-Whisper (CTranslate2 optimized)")
     
     async def initialize_async(self):
         """Initialize async components for the voice assistant."""
