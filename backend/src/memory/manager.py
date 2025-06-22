@@ -18,11 +18,20 @@ from ..core.interfaces import MemoryManager
 from ..core.exceptions import MemoryError
 from ..utils.logging import get_logger
 
-# A-MEM imports
+# A-MEM imports - avoid circular import
+AgenticMemorySystem = None
 try:
-    from ..a_mem.memory_system import AgenticMemorySystem
-except ImportError:
-    AgenticMemorySystem = None
+    import importlib
+    # Import dynamically to avoid circular imports
+    amem_module = importlib.import_module('.a_mem.memory_system', package='src')
+    AgenticMemorySystem = getattr(amem_module, 'AgenticMemorySystem')
+except Exception as e:
+    try:
+        # Fallback for direct execution
+        amem_module = importlib.import_module('src.a_mem.memory_system')
+        AgenticMemorySystem = getattr(amem_module, 'AgenticMemorySystem')
+    except Exception as e2:
+        AgenticMemorySystem = None
 
 logger = get_logger(__name__)
 
@@ -35,7 +44,7 @@ class AMemMemoryManager(MemoryManager):
     preference tracking, and smart memory storage decisions.
     """
     
-    def __init__(self, user_id: str, amem_model: str = 'all-MiniLM-L6-v2', 
+    def __init__(self, user_id: str, amem_model: str = 'nomic-embed-text:latest', 
                  llm_backend: str = "ollama", llm_model: str = "llama3.2:3b",
                  evo_threshold: int = 50):
         """Initialize the A-MEM memory manager.
@@ -50,23 +59,29 @@ class AMemMemoryManager(MemoryManager):
         Raises:
             MemoryError: If A-MEM system initialization fails
         """
+        print("[DEBUG] AMemMemoryManager.__init__: Starting initialization")
         if AgenticMemorySystem is None:
             raise MemoryError("A-MEM system not available. Please install a_mem package.")
             
+        print("[DEBUG] AMemMemoryManager.__init__: Setting user_id")
         self.user_id = user_id
+        print("[DEBUG] AMemMemoryManager.__init__: Creating executor")
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="amem_exec")
+        print("[DEBUG] AMemMemoryManager.__init__: Setting up memory cache")
         self.memory_cache = {
             'user_name': None, 
             'preferences': {}, 
             'facts': {}, 
             'last_updated': None
         }
+        print("[DEBUG] AMemMemoryManager.__init__: Creating memory queue")
         self.memory_queue = asyncio.Queue()
         self.background_task: Optional[asyncio.Task] = None
         self.memory_operations = 0
         self.cache_hits = 0
         
         # Initialize A-MEM system
+        print("[DEBUG] AMemMemoryManager.__init__: About to create AgenticMemorySystem")
         try:
             self.amem_system = AgenticMemorySystem(
                 model_name=amem_model,
@@ -74,16 +89,29 @@ class AMemMemoryManager(MemoryManager):
                 llm_model=llm_model,
                 evo_threshold=evo_threshold
             )
+            print("[DEBUG] AMemMemoryManager.__init__: AgenticMemorySystem created successfully")
             logger.info("🧠 A-MEM system initialized successfully")
         except Exception as e:
+            print(f"[DEBUG] AMemMemoryManager.__init__: AgenticMemorySystem creation failed: {e}")
             logger.error(f"❌ A-MEM initialization failed: {e}")
             raise MemoryError(f"Failed to initialize A-MEM system: {e}")
         
-        self._load_existing_memories()
-        logger.info("🧠 A-MEM memory manager initialized")
+        # Don't load existing memories during __init__ - do it async later
+        self._memories_loaded = False
+        logger.info("🧠 A-MEM memory manager initialized (memories will be loaded async)")
     
     async def start_background_processor(self):
         """Start the background memory processing task."""
+        # Load existing memories if not already loaded
+        if not self._memories_loaded:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(self.executor, self._load_existing_memories)
+                self._memories_loaded = True
+                logger.info("✅ Existing memories loaded asynchronously")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to load existing memories: {e}")
+        
         if self.memory_queue and (self.background_task is None or self.background_task.done()):
             self.background_task = asyncio.create_task(self._process_memory_queue())
             logger.info("🚀 Background A-MEM processor started.")
@@ -521,11 +549,19 @@ class AMemMemoryManager(MemoryManager):
             logger.error(f"❌ Background A-MEM storage failed: {e}")
     
     def get_user_context(self) -> str:
-        """Get current user context from memory.
+        """Get current user context from memory with Redis caching.
         
         Returns:
             str: User context information
         """
+        # Try A-MEM system context first (which includes Redis caching)
+        # Only if memories have been loaded
+        if self._memories_loaded and hasattr(self.amem_system, 'get_user_context'):
+            amem_context = self.amem_system.get_user_context(self.user_id)
+            if amem_context and amem_context.strip():
+                return amem_context
+        
+        # Fallback to local cache
         parts = []
         
         if self.memory_cache.get('user_name'):

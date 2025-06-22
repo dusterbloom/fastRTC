@@ -10,19 +10,20 @@ from .retrievers import ChromaRetriever
 import json
 import logging
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 import os
 from abc import ABC, abstractmethod
-from transformers import AutoModel, AutoTokenizer
 from nltk.tokenize import word_tokenize
 import pickle
 from pathlib import Path
-from litellm import completion
 import time
 import re
 import html
+
+# Redis cache import
+try:
+    from ..memory.redis_cache import MemoryRedisCache
+except ImportError:
+    MemoryRedisCache = None
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +87,19 @@ class MemoryNote:
         self.evolution_history = evolution_history or []
 
 class AgenticMemorySystem:
-    def get_user_context(self) -> str:
+    def get_user_context(self, user_id: str = "default") -> str:
         """
-        Retrieve long-term user context for LLM prompt.
+        Retrieve long-term user context for LLM prompt with Redis caching.
         This should aggregate key facts, user info, and important memory notes.
         """
-        # Example: Aggregate all memory notes tagged as 'user_info' or similar
+        # Try Redis cache first
+        if self.cache:
+            cached_context = self.cache.get_user_context(user_id)
+            if cached_context:
+                logger.debug(f"🚀 Cache hit for user context: {user_id}")
+                return cached_context
+        
+        # Build context from memories
         user_context_notes = [
             note.content for note in self.memories.values()
             if 'user_info' in getattr(note, 'tags', [])
@@ -100,6 +108,11 @@ class AgenticMemorySystem:
         if not user_context_notes:
             user_context_notes = [note.content for note in self.memories.values()]
         context = "\n".join(user_context_notes)
+        
+        # Cache the result (only if substantial content)
+        if self.cache and context and len(context) > 20:
+            self.cache.set_user_context(user_id, context, ttl=60)  # 1min TTL
+        
         logger.debug(f"[A-MEM] get_user_context: {context[:100]}...")
         return context
     """Core memory system that manages memory notes and their evolution.
@@ -112,7 +125,7 @@ class AgenticMemorySystem:
     """
     
     def __init__(self, 
-                 model_name: str = 'all-MiniLM-L6-v2',
+                 model_name: str = 'nomic-embed-text:latest',
                  llm_backend: str = "ollama",
                  llm_model: str = "llama3.2:3b",
                  evo_threshold: int = 10,
@@ -126,23 +139,35 @@ class AgenticMemorySystem:
             evo_threshold: Number of memories before triggering evolution
             api_key: API key for the LLM service
         """
+        print("[DEBUG] AgenticMemorySystem.__init__: Starting initialization")
         self.memories = {}
         self.model_name = model_name
         
         # Create retriever with persistent storage
+        print("[DEBUG] AgenticMemorySystem.__init__: About to create ChromaRetriever")
         self.retriever = ChromaRetriever(
             collection_name="memories",
             model_name=self.model_name,
             persist_directory="backend/chroma_db"  # This will persist!
         )
+        print("[DEBUG] AgenticMemorySystem.__init__: ChromaRetriever created successfully")
         
-        # Load existing memories from ChromaDB into self.memories
-        self._load_memories_from_chromadb()
+        # Don't load existing memories here - will be done async later
+        print("[DEBUG] AgenticMemorySystem.__init__: Skipping memory loading (will be done async)")
         
         # Initialize LLM controller
+        print("[DEBUG] AgenticMemorySystem.__init__: About to create LLMController")
         self.llm_controller = LLMController(llm_backend, llm_model, api_key)
+        print("[DEBUG] AgenticMemorySystem.__init__: LLMController created successfully")
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
+        
+        # Initialize Redis cache
+        self.cache = MemoryRedisCache() if MemoryRedisCache else None
+        if self.cache:
+            logger.info("🚀 Redis cache initialized for memory system")
+        else:
+            logger.info("⚠️ Redis cache not available, running without cache")
 
         # Evolution system prompt
         self._evolution_system_prompt = '''
@@ -156,6 +181,13 @@ class AgenticMemorySystem:
                                 - User messages start with "User:". Assistant messages start with "Assistant:".
                                 - Extract personal information, preferences, and facts primarily from **User messages**.
                                 - Assistant messages might provide conversational context or general knowledge, but are less likely to contain new information *about the user*.
+                                
+                                CRITICAL IDENTITY ISOLATION RULES:
+                                - NEVER link memories about different people (different names, identities)
+                                - If the new memory mentions a name (e.g., "Sarah") and neighbors mention different names (e.g., "Alex"), DO NOT connect them
+                                - Personal information about one person should NEVER update or influence memories about another person
+                                - Only connect memories that relate to the SAME person or have explicit relationship context
+                                - When in doubt about identity, prefer NO connection over wrong connection
 
                                 PROVIDED INFORMATION:
 
@@ -187,36 +219,76 @@ class AgenticMemorySystem:
                                     - "update_neighbor": Refine the context or tags of some of the "Nearest Neighbors Memories" based on insights from the "New Memory Note".
 
                                 3.  `suggested_connections` (list of strings):
-                                    If "strengthen" is in `actions`, provide a list of UUID strings corresponding to the IDs of the **"Nearest Neighbors Memories"** that were provided to you above.
-                                    You MUST ONLY select IDs from the {neighbor_number} neighbors listed in the "Nearest Neighbors Memories" section.
-                                    Do NOT invent or suggest IDs that were not part of the provided neighbors.
-                                    The purpose is to link the "New Memory Note" to one or more of these *specific* {neighbor_number} neighbors if a strong semantic connection exists.
-                                    Example: If "Nearest Neighbors Memories" included a neighbor with ID "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", and you want to connect to it, include that ID in this list.
-                                    Provide clean UUID strings, e.g., `["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"]`.
-                                    If no connections to the *provided neighbors* are appropriate, provide an empty list `[]`.
+                                    If "strengthen" is in `actions`, provide a list of UUID strings for neighbors that should be connected.
+                                    
+                                    CONNECTION CRITERIA (ALL must be met):
+                                    - The memories must relate to the SAME person/identity
+                                    - There must be a strong semantic relationship (same topics, complementary info)
+                                    - The connection must add value for future retrieval
+                                    
+                                    IDENTITY CHECK REQUIRED:
+                                    - If new memory mentions "Alex" and neighbor mentions "Sarah" → NO connection
+                                    - If new memory is about "Python preference" and neighbor is about "Alex's Python work" → ONLY connect if same person
+                                    - If different names/identities appear → NO connection unless explicit relationship exists
+                                    
+                                    You MUST ONLY select IDs from the {neighbor_number} neighbors provided above.
+                                    Provide clean UUID strings, e.g., `["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"]`.
+                                    If no valid connections exist (especially due to identity conflicts), provide an empty list `[]`.
 
-                                4.  `new_note_refined_tags` (list of strings):  // CHANGED FROM tags_to_update
-                                    Provide a list of 3-5 specific, descriptive tags for the "New Memory Note" itself. These tags should capture the core entities, topics, user sentiments, or user facts from the "New Memory Note"'s content.
-                                    Examples: ["Socrates", "philosophy_interest", "ancient_Greece", "user_likes_topic"], ["Peppy_name_introduction", "personal_info"].
-                                    These tags will REPLACE any existing tags on the new note, except for its original category (e.g., 'preference', 'personal_info', 'conversation_turn'), which will be preserved.
+                                4.  `new_note_refined_tags` (list of strings):  // EVOLVED TAGS ONLY
+                                    Provide a list of 2-3 EVOLVED, SPECIFIC tags that capture the ESSENCE of the "New Memory Note". 
+                                    
+                                    EFFICIENCY RULES:
+                                    - REPLACE generic tags with specific ones (e.g., "preference" → "python_preference")
+                                    - COMBINE related concepts (e.g., "programming" + "python" → "python_programming")
+                                    - ELIMINATE redundancy (do NOT use both "preference" and "user_preference")
+                                    - PRIORITIZE meaningful, searchable tags over generic ones
+                                    
+                                    Examples:
+                                    - Instead of ["preference", "programming", "language"]: use ["python_preference"]
+                                    - Instead of ["personal_info", "name", "introduction"]: use ["user_sarah"]
+                                    - Instead of ["conversation", "topic", "interest"]: use ["ml_interest"]
+                                    
+                                    These EVOLVED tags will REPLACE existing tags. Focus on QUALITY over QUANTITY.
 
                                 5.  `new_note_refined_context` (string): // NEW FIELD
                                     Provide a concise, one-sentence summary or refined context for the "New Memory Note" itself. This should capture the essence of this specific user-assistant interaction.
                                     Example: "User Peppy expressed a strong interest in Socrates and ancient Greek history."
 
                                 6.  `new_context_neighborhood` (list of strings):
-                                    If "update_neighbor" is in `actions`, provide a list of new context strings, one for each of the {neighbor_number} neighbors identified in "Nearest Neighbors Memories".
-                                    Carefully review each neighbor. If the "New Memory Note" provides significant new insight or clarification that REFINE'S that specific neighbor's existing context, provide the new, improved context string for that neighbor.
-                                    If a neighbor's current context is already accurate and sufficient, or if the new note doesn't add relevant information TO THAT SPECIFIC NEIGHBOR, you MUST repeat that neighbor's ORIGINAL context string (as provided in "Nearest Neighbors Memories") for that position in the list.
+                                    If "update_neighbor" is in `actions`, provide context updates ONLY for neighbors about the SAME person/identity.
+                                    
+                                    NEIGHBOR UPDATE RULES:
+                                    - ONLY update neighbors that relate to the same person mentioned in the new memory
+                                    - If new memory is about "Sarah" but neighbor is about "Alex" → return neighbor's ORIGINAL context unchanged
+                                    - If different identities are involved → NO updates, preserve original contexts
+                                    - Only refine context if the new memory adds relevant information about the SAME person
+                                    
+                                    Carefully review each neighbor for identity compatibility before updating.
+                                    If a neighbor relates to a different person or the new note doesn't add relevant information TO THAT SPECIFIC NEIGHBOR, you MUST repeat that neighbor's ORIGINAL context string.
                                     The list length MUST match `neighbor_number`.
-                                    Example (if neighbor_number is 2 and only neighbor 0 is updated): `["This is an updated, more precise context for neighbor 0.", "Original context of neighbor 1 as it was provided to you."]`
+                                    Example: `["Updated context for same-person neighbor.", "Original context preserved for different-person neighbor."]`
 
                                 7.  `new_tags_neighborhood` (list of lists of strings):
-                                    If "update_neighbor" is in `actions`, provide a list of new tag lists, one for each of the {neighbor_number} neighbors.
-                                    For each neighbor, if the "New Memory Note" helps to add more specific, descriptive, or clarifying tags, provide the complete NEW list of tags for that neighbor. These new tags will REPLACE its old tags, but its original category will be preserved by the system.
-                                    If a neighbor's current tags are already optimal, or if the new note doesn't warrant changing its tags, you MUST provide that neighbor's ORIGINAL list of tags (as provided in "Nearest Neighbors Memories") for that position in the outer list.
+                                    If "update_neighbor" is in `actions`, provide EVOLVED tag lists ONLY for neighbors about the SAME person/identity.
+                                    
+                                    IDENTITY-AWARE TAG EVOLUTION RULES:
+                                    - ONLY evolve neighbor tags if they relate to the SAME person as the new memory
+                                    - If new memory is about "Sarah" but neighbor is about "Alex" → return neighbor's ORIGINAL tags unchanged
+                                    - NEVER let one person's information influence another person's tags
+                                    - Only evolve tags if the new memory adds significant specificity about the SAME person
+                                    - CONSOLIDATE and REPLACE generic tags with more specific ones (for same person only)
+                                    - KEEP the most informative 2-3 tags per neighbor
+                                    
+                                    Examples of SAFE evolution (same person):
+                                    - ["personal_info", "conversation"] → ["user_sarah"] (if both about Sarah)
+                                    - ["preference", "general"] → ["alex_python_preference"] (if both about Alex)
+                                    
+                                    Examples of NO evolution (different people):
+                                    - New: "Sarah likes coffee" + Neighbor: "Alex likes Python" → Keep Alex's original tags unchanged
+                                    
                                     The outer list length MUST match `neighbor_number`.
-                                    Example (if neighbor_number is 2 and only neighbor 0's tags are refined): `[["new_topic", "clarified_entity", "user_sentiment_positive"], ["original_tag_X", "original_tag_Y"]]`
+                                    Example: `[["evolved_tag_same_person"], ["original_tags_different_person"], ["original_tags_no_evolution"]]`
 
                                 JSON OUTPUT FORMAT:
                                 Return your decision in JSON format (this below is an example DO NOT RETURN THIS PLEASE):
@@ -224,10 +296,10 @@ class AgenticMemorySystem:
                                     "should_evolve": true,
                                     "actions": ["strengthen", "update_neighbor"],
                                     "suggested_connections": ["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"],
-                                    "new_note_refined_tags": ["Socrates", "philosophy_interest", "ancient_Greece"],
-                                    "new_note_refined_context": "User Peppy expressed interest in Socrates and his philosophy.",
-                                    "new_context_neighborhood": ["Updated context for neighbor 0.", "Original context for neighbor 1 from input.", "Original context for neighbor 2 from input."],
-                                    "new_tags_neighborhood": [["refined_tag_A", "refined_tag_B"], ["original_tag_X_from_input"], ["original_tag_Y_from_input", "original_tag_Z_from_input"]]
+                                    "new_note_refined_tags": ["socrates_interest", "philosophy_enthusiasm"],
+                                    "new_note_refined_context": "User expressed deep interest in Socrates and ancient philosophy.",
+                                    "new_context_neighborhood": ["Updated precise context for neighbor 0.", "Original context from input.", "Original context from input."],
+                                    "new_tags_neighborhood": [["ancient_philosophy"], ["original_tag_from_input"], ["evolved_specific_tag"]]
                                 }}
                                 '''
         
@@ -277,7 +349,7 @@ class AgenticMemorySystem:
             Content for analysis:
             """ + content
         try:
-            response = self.llm_controller.llm.get_completion(prompt, response_format={"type": "json_schema", "json_schema": {
+            response = self.llm_controller.get_completion(prompt, response_format={"type": "json_schema", "json_schema": {
                         "name": "response",
                         "schema": {
                             "type": "object",
@@ -315,6 +387,10 @@ class AgenticMemorySystem:
         evo_label, processed_note = self.process_memory(initial_note)
         
         self.memories[processed_note.id] = processed_note
+        
+        # Invalidate user context cache when new memory is added
+        if self.cache:
+            self.cache.invalidate_user_context("default")  # Could be user-specific later
         
         metadata = {
             "id": processed_note.id, "content": processed_note.content,
@@ -721,9 +797,16 @@ class AgenticMemorySystem:
         return memories[:k]
 
     def search_agentic(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for memories using ChromaDB retrieval."""
+        """Search for memories using ChromaDB retrieval with Redis caching."""
         if not self.memories:
             return []
+        
+        # Try Redis cache first
+        if self.cache:
+            cached_results = self.cache.get_search_results(query)
+            if cached_results:
+                logger.debug(f"🚀 Cache hit for query: {query[:50]}...")
+                return cached_results[:k]
             
         try:
             # Get results from ChromaDB
@@ -796,6 +879,10 @@ class AgenticMemorySystem:
                             seen_ids.add(link_id)
                             neighbor_count += 1
             
+            # Cache the results
+            if self.cache and memories:
+                self.cache.set_search_results(query, memories[:k])
+            
             return memories[:k]
         except Exception as e:
             logger.error(f"Error in search_agentic: {str(e)}")
@@ -815,11 +902,17 @@ class AgenticMemorySystem:
         prompt = f"Context:\n{amem_context}\n\nUser: {user_text}\nAssistant:"
 
         # 3. Call LLM
-        response = self.llm_controller.llm.get_completion(prompt)
+        response = self.llm_controller.get_completion(prompt)
         # Optionally, update memory here as well
         return response
 
     def process_memory(self, note: MemoryNote) -> Tuple[bool, MemoryNote]:
+        # Check if we should skip evolution entirely
+        neighbors_text_for_llm, neighbor_ids, neighbor_notes = self.find_related_memories(note.content, k=5)
+        
+        if self._should_skip_evolution(note, len(neighbor_ids)):
+            return False, note
+            
         if not self.memories or len(self.memories) == 0:
             logger.info(f"DEBUG process_memory: No other memories exist (excluding current). Skipping evolution for note ID {note.id}.")
             # Even if no other memories, we might want to refine the new note itself.
@@ -841,10 +934,8 @@ class AgenticMemorySystem:
             note.tags = sorted(list(final_tags))
             return False, note # No evolution actions if no neighbors
 
+        # Continue with evolution processing
         try:
-            # Get nearest neighbors: text for LLM, list of their IDs, and list of their Note objects
-            neighbors_text_for_llm, neighbor_ids, neighbor_notes = self.find_related_memories(note.content, k=5)
-            
             # If no *actual* neighbors found by semantic search, we can still try to refine the note itself
             if not neighbor_ids and not neighbor_notes:
                 logger.info(f"DEBUG process_memory: No valid neighbors found for note ID {note.id}. Attempting self-refinement only.")
@@ -865,21 +956,21 @@ class AgenticMemorySystem:
                 return False, note # No evolution actions as no neighbors to link or update
 
             prompt = self._evolution_system_prompt.format(
-                category=note.category, # NEW: Pass original category
-                timestamp=note.timestamp, # NEW: Pass timestamp
+                category=note.category,
+                timestamp=note.timestamp,
                 content=note.content,
-                context=note.context,    # This is the note's *current/original* context
+                context=note.context,
                 keywords=str(note.keywords),
                 nearest_neighbors_memories=neighbors_text_for_llm,
                 neighbor_number=len(neighbor_ids)
             )
             
             try:
-                response_str = self.llm_controller.llm.get_completion( # Renamed to response_str
+                response_str = self.llm_controller.get_completion(
                     prompt,
                     temperature=0.1,
                     response_format={"type": "json_schema", "json_schema": {
-                        "name": "evolution_decision", # More descriptive schema name
+                        "name": "evolution_decision",
                         "schema": {
                             "type": "object",
                             "properties": {
@@ -897,14 +988,26 @@ class AgenticMemorySystem:
                         },
                     }}
                 )
-                logger.debug(f"RAW LLM Response String for Evolution: {response_str}")
-                response_json = json.loads(response_str)
+                logger.debug(f"RAW LLM Response String for Evolution (length: {len(response_str) if response_str else 0}): '{response_str}'")
+                
+                if not response_str or response_str.strip() == "":
+                    logger.warning(f"Empty LLM response for note {note.id}, using fallback")
+                    response_json = {
+                        "should_evolve": False,
+                        "actions": [],
+                        "suggested_connections": [],
+                        "new_note_refined_tags": [],
+                        "new_note_refined_context": "",
+                        "new_context_neighborhood": [],
+                        "new_tags_neighborhood": []
+                    }
+                else:
+                    response_json = json.loads(response_str)
                 
                 should_evolve = response_json.get("should_evolve", False)
-                
                 logger.info(f"DEBUG process_memory: LLM Evolution response for note {note.id}: {response_json}")
 
-                # --- Refine the NEW NOTE itself based on LLM output ---
+                # Refine the NEW NOTE itself based on LLM output
                 llm_new_note_tags_raw = response_json.get("new_note_refined_tags", [])
                 llm_suggested_new_note_tags = []
                 if isinstance(llm_new_note_tags_raw, list):
@@ -917,7 +1020,7 @@ class AgenticMemorySystem:
                 if note.category and isinstance(note.category, str) and note.category.strip() and note.category != "Uncategorized":
                     current_note_final_tags.add(note.category.strip())
                 current_note_final_tags.update(llm_suggested_new_note_tags)
-                note.tags = sorted([tag for tag in list(current_note_final_tags) if tag]) # Ensure sorted and no empty strings
+                note.tags = sorted([tag for tag in list(current_note_final_tags) if tag])
                 logger.info(f"DEBUG process_memory: Note ID {note.id}, Updated Tags after LLM refinement: {note.tags}")
 
                 # Update new note's context
@@ -925,21 +1028,18 @@ class AgenticMemorySystem:
                 if isinstance(new_note_context_from_llm, str) and new_note_context_from_llm.strip():
                     note.context = new_note_context_from_llm.strip()
                     logger.info(f"DEBUG process_memory: Note ID {note.id}, Updated Context after LLM refinement: {note.context}")
-                # --- End of new note refinement ---
 
-
-                if should_evolve: # Only perform actions if should_evolve is true
+                if should_evolve:
                     actions = response_json.get("actions", [])
                     
                     for action in actions:
                         if action == "strengthen":
                             llm_connection_refs = response_json.get("suggested_connections", [])
-                            # Pass neighbor_ids to the parser
                             llm_suggested_indices = self._parse_llm_connection_indices(llm_connection_refs, neighbor_ids, len(neighbor_ids))
                             
-                            actual_ids_to_link = [neighbor_ids[idx] for idx in llm_suggested_indices if idx < len(neighbor_ids)] # safety check
+                            actual_ids_to_link = [neighbor_ids[idx] for idx in llm_suggested_indices if idx < len(neighbor_ids)]
                             
-                            current_links = set(note.links) # Assuming note.links is already a list
+                            current_links = set(note.links)
                             current_links.update(actual_ids_to_link)
                             note.links = list(current_links)
                             logger.info(f"DEBUG process_memory/strengthen: Note ID {note.id} linked with IDs: {actual_ids_to_link}. New links: {note.links}")
@@ -973,20 +1073,19 @@ class AgenticMemorySystem:
                                     neighbor_note_to_update.tags = sorted([tag for tag in list(final_neighbor_tags) if tag])
                                 
                                 logger.info(f"DEBUG process_memory/update_neighbor: Updating neighbor ID {neighbor_note_to_update.id}. New Context: '{neighbor_note_to_update.context}', New Tags: {neighbor_note_to_update.tags}")
-                                self.update( # This calls ChromaRetriever.add_document
+                                self.update(
                                     memory_id=neighbor_note_to_update.id,
                                     content=neighbor_note_to_update.content,
                                     context=neighbor_note_to_update.context,
                                     tags=neighbor_note_to_update.tags,
                                     keywords=neighbor_note_to_update.keywords,
                                     links=neighbor_note_to_update.links,
-                                    # Ensure all relevant fields of MemoryNote are passed if they can be updated
                                     category=neighbor_note_to_update.category,
                                     timestamp=neighbor_note_to_update.timestamp,
                                     retrieval_count=neighbor_note_to_update.retrieval_count,
                                     evolution_history=neighbor_note_to_update.evolution_history
                                 )
-                return should_evolve, note # Return the (potentially modified) new note
+                return should_evolve, note
                 
             except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"Error processing LLM evolution response for note ID {note.id}: {str(e)}. Original note returned, possibly with initial analysis.", exc_info=True)
@@ -998,4 +1097,31 @@ class AgenticMemorySystem:
         except Exception as e:
             logger.error(f"Error in process_memory (e.g., finding neighbors) for note ID {note.id}: {str(e)}. Original note returned.", exc_info=True)
             return False, note
+
+    def _should_skip_evolution(self, note: MemoryNote, neighbors_count: int) -> bool:
+        """Determine if memory evolution should be skipped based on semantic meaningfulness."""
+        
+        # Skip if already well-structured (has rich metadata)
+        if (len(note.keywords) >= 3 and 
+            note.context != "General" and 
+            len(note.tags) >= 2):
+            logger.debug(f"Skipping evolution for note {note.id}: already well-structured")
+            return True
+        
+        # Skip if no semantic neighbors found (nothing to evolve with)
+        if neighbors_count == 0:
+            logger.debug(f"Skipping evolution for note {note.id}: no neighbors found")
+            return True
+            
+        # Skip if assistant response contains system/error messages
+        content_lower = note.content.lower()
+        system_indicators = [
+            "error", "sorry, i can't", "i don't understand", 
+            "please try again", "system:", "debug:"
+        ]
+        if any(indicator in content_lower for indicator in system_indicators):
+            logger.debug(f"Skipping evolution for note {note.id}: contains system message")
+            return True
+            
+        return False
 

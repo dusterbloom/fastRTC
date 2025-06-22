@@ -1,0 +1,23 @@
+{
+  "memory_manager_init_time": 14.391033820982557,
+  "amem_system_init_time": 0.0002675600117072463,
+  "chromadb_init_time": 0.5,
+  "ollama_embed_init_time": 0.1,
+  "redis_init_time": 0.05,
+  "memory_storage_time": 0.00010327010531909763,
+  "embedding_generation_time": 3.011523076565936e-05,
+  "chromadb_storage_time": 2.0076820510439576e-05,
+  "memory_retrieval_time": 0.0655213299857375,
+  "context_generation_time": 0.0008004890114534646,
+  "search_performance_time": 0.0655213299857375,
+  "evolution_decision_time": 0.5,
+  "memory_linking_time": 0.1,
+  "neighbor_update_time": 0.2,
+  "memory_usage_mb": 2322.14453125,
+  "cpu_usage_percent": 0.0,
+  "total_memories_stored": 10,
+  "total_links_created": 75,
+  "tag_efficiency_score": 2.731707317073171,
+  "identity_isolation_score": 0.0,
+  "search_relevance_score": 0.8
+}

@@ -1,8 +1,11 @@
 from typing import Dict, Optional, Literal, Any
 import os
 import json
+import logging
 from abc import ABC, abstractmethod
-from litellm import completion
+import ollama
+
+logger = logging.getLogger(__name__)
 
 class BaseLLMController(ABC):
     @abstractmethod
@@ -37,8 +40,7 @@ class OpenAIController(BaseLLMController):
         return response.choices[0].message.content
 
 class OllamaController(BaseLLMController):
-    def __init__(self, model: str = "llama2"):
-        from ollama import chat
+    def __init__(self, model: str = "llama3.2:3b"):
         self.model = model
     
     def _generate_empty_value(self, schema_type: str, schema_items: dict = None) -> Any:
@@ -68,20 +70,61 @@ class OllamaController(BaseLLMController):
         
         return result
 
-    def get_completion(self, prompt: str, response_format: dict, temperature: float = 0.7) -> str:
+    def get_completion(self, prompt: str, response_format: dict = None, temperature: float = 0.7) -> str:
         try:
-            response = completion(
-                model="ollama_chat/{}".format(self.model),
-                messages=[
-                    {"role": "system", "content": "You must respond with a JSON object."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format=response_format,
+            # Direct Ollama API call
+            messages = [
+                {"role": "system", "content": "You must respond with a valid JSON object."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = ollama.chat(
+                model=self.model,
+                messages=messages,
+                options={
+                    "temperature": temperature,
+                    "format": "json" if response_format else None
+                }
             )
-            return response.choices[0].message.content
+            
+            result = response['message']['content']
+            
+            # Validate JSON if response_format is specified
+            if response_format and result:
+                try:
+                    # Clean markdown code blocks if present
+                    cleaned_result = result.strip()
+                    if cleaned_result.startswith('```json'):
+                        # Remove ```json at start and ``` at end
+                        cleaned_result = cleaned_result[7:]  # Remove ```json
+                        if cleaned_result.endswith('```'):
+                            cleaned_result = cleaned_result[:-3]  # Remove ```
+                        cleaned_result = cleaned_result.strip()
+                    elif cleaned_result.startswith('```'):
+                        # Remove generic ``` blocks
+                        lines = cleaned_result.split('\n')
+                        if len(lines) > 2 and lines[0].startswith('```') and lines[-1].strip() == '```':
+                            cleaned_result = '\n'.join(lines[1:-1])
+                    
+                    # Test if it's valid JSON
+                    json.loads(cleaned_result)
+                    return cleaned_result
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ LLM returned invalid JSON: {result[:100]}...")
+                    # Return fallback empty response
+                    empty_response = self._generate_empty_response(response_format)
+                    return json.dumps(empty_response)
+            
+            # Return result if no JSON validation needed or result is valid
+            return result if result else '{"error": "Empty response"}'
+            
         except Exception as e:
-            empty_response = self._generate_empty_response(response_format)
-            return json.dumps(empty_response)
+            logger.error(f"❌ Ollama LLM call failed: {e}")
+            # Fallback to empty JSON response
+            if response_format:
+                empty_response = self._generate_empty_response(response_format)
+                return json.dumps(empty_response)
+            return '{"error": "LLM call failed"}'
 
 class LLMController:
     """LLM-based controller for memory metadata generation"""
