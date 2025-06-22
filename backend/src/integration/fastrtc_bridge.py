@@ -60,22 +60,24 @@ class FastRTCBridge:
                     can_interrupt=True,
                        algo_options=AlgoOptions(
                         # This is the GATEKEEPER. We are making it extremely sensitive.
-                        speech_threshold=0.05,  # Drastically lower: will detect even quiet speech.
-                        started_talking_threshold=0.1,
-                        audio_chunk_duration=0.5 # Process audio in smaller chunks for responsiveness
+                        speech_threshold=0.5,  # Drastically lower: will detect even quiet speech.
+                        started_talking_threshold=0.20,
+                        audio_chunk_duration=0.6 # Process audio in smaller chunks for responsiveness
                     ),
                     model_options=SileroVadOptions(
-                        # This is the TIMER. We are keeping it very patient.
+                        # This is the TIMER. Updated for faster interruption support.
                         threshold=0.2,                  # More sensitive model threshold
-                        min_speech_duration_ms=150,     # Catches very short words like "a" or "I"
-                        min_silence_duration_ms=4000,   # PATIENCE: Waits 4 seconds of pure silence
-                        speech_pad_ms=500               # Generous buffer at the end of your speech
+                        min_speech_duration_ms=350,     # Catches very short words like "a" or "I"
+                        min_silence_duration_ms=1842,   # FASTER: Reduced from 4000ms to 1200ms for quicker interruption
+                        speech_pad_ms=450              # Generous buffer at the end of your speech
                     )
                 ),
                 modality="audio",
                 mode="send-receive",
                 track_constraints=self._get_audio_constraints()
             )
+            
+
             
             logger.info("✅ FastRTC stream created successfully")
             return self.stream

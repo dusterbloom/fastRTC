@@ -158,24 +158,24 @@ class StreamCallbackHandler:
                 yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
                 return
             
-            # --- Adaptive VAD Logic ---
-            speech_duration_s = len(audio_array) / sample_rate if sample_rate > 0 else 0
-            if self.adaptive_vad: # Ensure VAD instance exists
-                self.adaptive_vad.record_turn(speech_duration_s, audio_array, sample_rate)
-                new_vad_options = self.adaptive_vad.get_current_vad_options(speech_duration_s)
+            # # --- Adaptive VAD Logic ---
+            # speech_duration_s = len(audio_array) / sample_rate if sample_rate > 0 else 0
+            # if self.adaptive_vad: # Ensure VAD instance exists
+            #     self.adaptive_vad.record_turn(speech_duration_s, audio_array, sample_rate)
+            #     new_vad_options = self.adaptive_vad.get_current_vad_options(speech_duration_s)
                 
-                # Log VAD status
-                vad_status = self.adaptive_vad.get_status()
-                # (Removed verbose debug prints for cleaner terminal output)
+            #     # Log VAD status
+            #     vad_status = self.adaptive_vad.get_status()
+            #     # (Removed verbose debug prints for cleaner terminal output)
                 
-                # TODO: Implement dynamic update of FastRTC stream VAD parameters
-                # This might involve:
-                # 1. Accessing the stream object from self.voice_assistant.fastrtc_bridge
-                # 2. Calling a method on the stream object to update its VAD options
-                #    (e.g., stream.update_vad_options(new_vad_options))
-                # This functionality may need to be added to FastRTCBridge or the fastrtc library.
-                # (Removed verbose debug prints for cleaner terminal output)
-            # --- End Adaptive VAD Logic ---
+            #     # TODO: Implement dynamic update of FastRTC stream VAD parameters
+            #     # This might involve:
+            #     # 1. Accessing the stream object from self.voice_assistant.fastrtc_bridge
+            #     # 2. Calling a method on the stream object to update its VAD options
+            #     #    (e.g., stream.update_vad_options(new_vad_options))
+            #     # This functionality may need to be added to FastRTCBridge or the fastrtc library.
+            #     # (Removed verbose debug prints for cleaner terminal output)
+            # # --- End Adaptive VAD Logic ---
             
             # (Removed verbose debug prints for cleaner terminal output)
             # Perform speech-to-text conversion

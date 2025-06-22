@@ -9,6 +9,7 @@ from .engines.stt import STTEngine
 from .engines.tts.kokoro_tts import KokoroTTSEngine
 from .language.detector import HybridLanguageDetector, MediaPipeLanguageDetector, KeywordLanguageDetector
 from .language.voice_mapper import VoiceMapper
+from .user_identification import SpokenUserIdentifier, VoicePrintManager
 
 __all__ = [
     'BluetoothAudioProcessor',
@@ -17,5 +18,7 @@ __all__ = [
     'HybridLanguageDetector',
     'MediaPipeLanguageDetector',
     'KeywordLanguageDetector',
-    'VoiceMapper'
+    'VoiceMapper',
+    'SpokenUserIdentifier',
+    'VoicePrintManager'
 ]

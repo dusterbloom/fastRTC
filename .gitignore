@@ -5,3 +5,4 @@ archive/
 __pycache__/
 .vscode/
 backend/chroma_db/
+data/

@@ -80,8 +80,9 @@ class VoiceAssistant:
 
         # Session and user tracking (set early for memory manager)
         print("[DEBUG] VoiceAssistant.__init__: Setting user ID and session ID")
-        self.user_id = "voice_user_01"
-        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        self.user_id = "guest_user"  # Default until user identifies themselves
+        self.session_id = f"session_{self.user_id}"  # Persistent per user
+        self.user_identified = False
 
         # Initialize or use provided components
         print("[DEBUG] VoiceAssistant.__init__: Creating audio processor")
@@ -112,6 +113,11 @@ class VoiceAssistant:
         self.turn_count = 0
         self.voice_detection_successes = 0
         self.total_response_time = deque(maxlen=20)
+        
+        # Voice recognition state
+        self.enrollment_mode = False
+        self.enrollment_samples = []
+        self.enrollment_target_name = None
 
         # Async resources
         self.http_session: Optional[aiohttp.ClientSession] = None
@@ -124,12 +130,12 @@ class VoiceAssistant:
     
     def _setup_memory_manager(self) -> AMemMemoryManager:
         """
-        Set up the memory manager with Qdrant configuration.
+        Set up the memory manager with user-specific configuration.
         
         Returns:
             Configured AMemMemoryManager instance
         """
-        logger.info("🔧 Setting up memory manager (Qdrant removed)...")
+        logger.info(f"🔧 Setting up memory manager for user: {self.user_id}")
         # Set up dummy OpenAI key for local use
         os.environ["OPENAI_API_KEY"] = "dummy-key-for-local-use"
         return AMemMemoryManager(self.user_id)
@@ -493,11 +499,11 @@ class VoiceAssistant:
             return {'error': str(e)}
     
     def reset_session(self):
-        """Reset the current session and start fresh."""
+        """Reset the current session while preserving user identity."""
         logger.info("🔄 Resetting voice assistant session...")
         
-        # Generate new session ID
-        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        # Keep the same session ID to preserve user identity and memory
+        # Only reset conversation state, not user identity
         
         # Reset counters
         self.turn_count = 0
@@ -511,6 +517,395 @@ class VoiceAssistant:
         self.current_language = DEFAULT_LANGUAGE
         
         logger.info(f"✅ Session reset complete. New session: {self.session_id}")
+    
+    def identify_user(self, name: str) -> bool:
+        """
+        Identify user and switch to their persistent session.
+        
+        Args:
+            name: User's name from speech ("My name is John")
+            
+        Returns:
+            True if user identification was successful
+        """
+        try:
+            # Clean and normalize the name
+            clean_name = self._normalize_username(name)
+            if not clean_name:
+                logger.warning(f"⚠️ Invalid username: {name}")
+                return False
+            
+            # Create user ID from name
+            new_user_id = f"user_{clean_name}"
+            
+            # Check if this is a new user
+            if new_user_id != self.user_id:
+                logger.info(f"👤 User identification: {name} -> {new_user_id}")
+                
+                # Store old session info for potential recovery
+                old_user_id = self.user_id
+                old_session_id = self.session_id
+                
+                # Switch to new user
+                self.user_id = new_user_id
+                self.session_id = f"session_{new_user_id}"
+                self.user_identified = True
+                
+                # Reinitialize memory manager for new user
+                self._switch_user_memory(old_user_id, new_user_id)
+                
+                logger.info(f"✅ Switched to user: {clean_name} (session: {self.session_id})")
+                return True
+            else:
+                logger.info(f"👤 User already identified as: {clean_name}")
+                self.user_identified = True
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ User identification failed: {e}")
+            return False
+    
+    def _normalize_username(self, name: str) -> str:
+        """
+        Normalize username for consistent storage.
+        
+        Args:
+            name: Raw name from speech
+            
+        Returns:
+            Normalized username or empty string if invalid
+        """
+        if not name or not isinstance(name, str):
+            return ""
+        
+        # Clean the name: lowercase, remove special chars, keep letters/numbers/spaces
+        import re
+        clean = re.sub(r'[^a-zA-Z0-9\s]', '', name.lower().strip())
+        
+        # Replace spaces with underscores, remove multiple spaces
+        clean = re.sub(r'\s+', '_', clean)
+        
+        # Limit length and ensure it's not empty
+        clean = clean[:20]  # Max 20 characters
+        
+        return clean if len(clean) >= 2 else ""
+    
+    def _switch_user_memory(self, old_user_id: str, new_user_id: str):
+        """
+        Switch memory manager to new user.
+        
+        Args:
+            old_user_id: Previous user ID
+            new_user_id: New user ID
+        """
+        try:
+            logger.info(f"🧠 Switching memory from {old_user_id} to {new_user_id}")
+            
+            # Create new memory manager for the new user
+            old_memory_manager = self.memory_manager
+            self.memory_manager = self._setup_memory_manager()
+            
+            # Update memory manager's user ID
+            if hasattr(self.memory_manager, 'user_id'):
+                self.memory_manager.user_id = new_user_id
+            
+            logger.info(f"✅ Memory switched to user: {new_user_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to switch user memory: {e}")
+            # Fallback: keep old memory manager
+            logger.warning("⚠️ Keeping previous memory manager as fallback")
+    
+    def get_user_info(self) -> Dict[str, Any]:
+        """
+        Get current user information.
+        
+        Returns:
+            Dictionary with user info
+        """
+        return {
+            "user_id": self.user_id,
+            "session_id": self.session_id,
+            "identified": self.user_identified,
+            "is_guest": self.user_id.startswith("guest_"),
+            "display_name": self.user_id.replace("user_", "").replace("_", " ").title() if self.user_identified else "Guest"
+        }
+    
+    def check_for_user_identification(self, user_text: str) -> bool:
+        """
+        Check if user text contains identification and process it.
+        
+        Args:
+            user_text: User's speech text
+            
+        Returns:
+            True if user was identified from the text
+        """
+        import re
+        
+        # Patterns for user identification
+        name_patterns = [
+            r"my name is (\w+(?:\s+\w+)?)",
+            r"i am (\w+(?:\s+\w+)?)",
+            r"i'm (\w+(?:\s+\w+)?)",
+            r"call me (\w+(?:\s+\w+)?)",
+            r"this is (\w+(?:\s+\w+)?)"
+        ]
+        
+        for pattern in name_patterns:
+            match = re.search(pattern, user_text.lower())
+            if match:
+                name = match.group(1).strip()
+                if self.identify_user(name):
+                    return True
+        
+        return False
+    
+    def _on_voice_identified(self, user_id: str, name: str, confidence: float):
+        """
+        Callback when user is identified via voice recognition (background).
+        
+        Args:
+            user_id: Identified user ID
+            name: User's name
+            confidence: Recognition confidence
+        """
+        try:
+            # Only switch if it's a different user
+            if user_id != self.user_id:
+                logger.info(f"🎙️ Voice identified (background): {name} (confidence: {confidence:.3f})")
+                
+                # Switch user context
+                old_user_id = self.user_id
+                self.user_id = user_id
+                self.session_id = f"session_{user_id}"
+                self.user_identified = True
+                
+                # Switch memory context
+                self._switch_user_memory(old_user_id, user_id)
+                
+                logger.info(f"✅ Switched to user: {name} via voice recognition")
+        
+        except Exception as e:
+            logger.error(f"❌ Voice identification callback failed: {e}")
+    
+    def process_audio_for_background_recognition(self, audio: np.ndarray, sample_rate: int = 16000):
+        """
+        Process audio for background voice recognition (non-blocking).
+        
+        Args:
+            audio: Audio samples
+            sample_rate: Audio sample rate
+        """
+        try:
+            # Add audio to background processing queue
+            self.voice_print_manager.add_audio_chunk(audio, sample_rate)
+        except Exception as e:
+            logger.debug(f"Background voice processing error: {e}")
+    
+    def _check_enrollment_commands(self, user_text: str) -> Optional[str]:
+        """
+        Check for voice enrollment commands in user text.
+        
+        Args:
+            user_text: User's speech text
+            
+        Returns:
+            Response message if enrollment command found, None otherwise
+        """
+        import re
+        
+        text_lower = user_text.lower()
+        
+        # Check for enrollment start commands
+        enrollment_patterns = [
+            r"learn my voice",
+            r"teach you my voice", 
+            r"enroll my voice",
+            r"remember my voice",
+            r"train my voice"
+        ]
+        
+        for pattern in enrollment_patterns:
+            if re.search(pattern, text_lower):
+                # Extract name if provided
+                name_match = re.search(r"(?:i am|my name is|call me|i'm)\s+(\w+(?:\s+\w+)?)", text_lower)
+                if name_match:
+                    name = name_match.group(1).strip()
+                    return self.start_voice_enrollment(name)
+                else:
+                    return "I'd like to learn your voice! What's your name?"
+        
+        # Check for enrollment cancellation
+        if re.search(r"cancel.*enrollment|stop.*enrollment|never mind", text_lower):
+            if self.enrollment_mode:
+                return self.cancel_enrollment()
+        
+        return None
+    
+    def process_audio_for_voice_recognition(self, audio: np.ndarray, sample_rate: int = 16000) -> Optional[str]:
+        """
+        Process audio for voice-based user identification.
+        
+        Args:
+            audio: Audio samples
+            sample_rate: Audio sample rate
+            
+        Returns:
+            User ID if identified, None otherwise
+        """
+        try:
+            # Skip if audio is too short
+            if len(audio) < sample_rate * 0.5:  # Less than 0.5 seconds
+                return None
+            
+            # Try to identify speaker
+            result = self.voice_print_manager.identify_speaker(audio, sample_rate)
+            
+            if result:
+                user_id, name, confidence = result
+                
+                # Switch to identified user if different
+                if user_id != self.user_id:
+                    logger.info(f"🎙️ Voice identified: {name} (confidence: {confidence:.3f})")
+                    
+                    # Update user identity
+                    old_user_id = self.user_id
+                    self.user_id = user_id
+                    self.session_id = f"session_{user_id}"
+                    self.user_identified = True
+                    
+                    # Switch memory context
+                    self._switch_user_memory(old_user_id, user_id)
+                    
+                    return user_id
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Voice recognition error: {e}")
+            return None
+    
+    def start_voice_enrollment(self, name: str) -> str:
+        """
+        Start voice enrollment process for a user.
+        
+        Args:
+            name: User's name
+            
+        Returns:
+            Instructions for the user
+        """
+        try:
+            self.enrollment_mode = True
+            self.enrollment_samples = []
+            self.enrollment_target_name = name
+            
+            logger.info(f"🎙️ Starting voice enrollment for: {name}")
+            
+            return (f"Starting voice enrollment for {name}. "
+                   f"Please say a few sentences. I need at least 3 samples to learn your voice.")
+                   
+        except Exception as e:
+            logger.error(f"❌ Failed to start enrollment: {e}")
+            return "Sorry, I couldn't start voice enrollment."
+    
+    def process_enrollment_audio(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+        """
+        Process audio during enrollment.
+        
+        Args:
+            audio: Audio samples
+            sample_rate: Audio sample rate
+            
+        Returns:
+            Status message for the user
+        """
+        try:
+            if not self.enrollment_mode:
+                return "Not in enrollment mode."
+            
+            # Skip if audio is too short
+            if len(audio) < sample_rate * 1.0:  # Less than 1 second
+                return "Please say something longer."
+            
+            # Add sample to enrollment
+            self.enrollment_samples.append((audio, sample_rate))
+            
+            remaining = max(0, 3 - len(self.enrollment_samples))
+            
+            if remaining > 0:
+                return f"Sample {len(self.enrollment_samples)} recorded. Need {remaining} more samples."
+            else:
+                # Enough samples, complete enrollment
+                return self._complete_enrollment()
+                
+        except Exception as e:
+            logger.error(f"❌ Enrollment audio processing failed: {e}")
+            return "Sorry, there was an error processing your voice sample."
+    
+    def _complete_enrollment(self) -> str:
+        """Complete the voice enrollment process"""
+        try:
+            if not self.enrollment_target_name or not self.enrollment_samples:
+                return "Enrollment data missing."
+            
+            # Enroll user with voice samples
+            success = self.voice_print_manager.enroll_user(
+                name=self.enrollment_target_name,
+                audio_samples=self.enrollment_samples
+            )
+            
+            if success:
+                # Switch to newly enrolled user
+                user_id = f"user_{self.enrollment_target_name.lower().replace(' ', '_')}"
+                old_user_id = self.user_id
+                
+                self.user_id = user_id
+                self.session_id = f"session_{user_id}"
+                self.user_identified = True
+                
+                # Switch memory context
+                self._switch_user_memory(old_user_id, user_id)
+                
+                # Clear enrollment state
+                self.enrollment_mode = False
+                self.enrollment_samples = []
+                self.enrollment_target_name = None
+                
+                logger.info(f"✅ Voice enrollment completed for: {self.enrollment_target_name}")
+                
+                return (f"Perfect! I've learned your voice, {self.enrollment_target_name}. "
+                       f"From now on, I'll recognize you automatically when you speak.")
+            else:
+                return "Sorry, voice enrollment failed. Please try again."
+                
+        except Exception as e:
+            logger.error(f"❌ Enrollment completion failed: {e}")
+            return "Sorry, there was an error completing your voice enrollment."
+    
+    def cancel_enrollment(self) -> str:
+        """Cancel ongoing voice enrollment"""
+        self.enrollment_mode = False
+        self.enrollment_samples = []
+        self.enrollment_target_name = None
+        return "Voice enrollment cancelled."
+    
+    def get_voice_recognition_stats(self) -> Dict[str, Any]:
+        """Get voice recognition system statistics"""
+        try:
+            stats = self.voice_print_manager.get_stats()
+            enrolled_users = self.voice_print_manager.get_enrolled_users()
+            
+            return {
+                "system_stats": stats,
+                "enrolled_users": enrolled_users,
+                "enrollment_mode": self.enrollment_mode,
+                "enrollment_samples_count": len(self.enrollment_samples) if self.enrollment_mode else 0
+            }
+        except Exception as e:
+            logger.error(f"❌ Failed to get voice recognition stats: {e}")
+            return {"error": str(e)}
     
     def __repr__(self) -> str:
         """String representation of the voice assistant."""

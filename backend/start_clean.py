@@ -170,6 +170,11 @@ async def startup_event():
         print("[DEBUG] startup_event: About to create FastRTC stream")
         logger.info("🔧 Creating FastRTC stream...")
         stream = await create_fastrtc_stream()
+        
+        # Store bridge reference for future use
+        print("[DEBUG] startup_event: Setting up FastRTC bridge reference")
+        voice_assistant.fastrtc_bridge = fastrtc_bridge
+        
         print("[DEBUG] startup_event: FastRTC stream created, about to mount")
         logger.info("🔧 Mounting FastRTC stream...")
         stream.mount(app, path="/assistant")
