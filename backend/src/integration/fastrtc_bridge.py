@@ -62,13 +62,13 @@ class FastRTCBridge:
                         # This is the GATEKEEPER. We are making it extremely sensitive.
                         speech_threshold=0.5,  # Drastically lower: will detect even quiet speech.
                         started_talking_threshold=0.10,
-                        audio_chunk_duration=0.6 # Process audio in smaller chunks for responsiveness
+                        audio_chunk_duration=1.5 # Process audio in smaller chunks for responsiveness
                     ),
                     model_options=SileroVadOptions(
                         # This is the TIMER. Updated for faster interruption support.
                         threshold=0.2,                  # More sensitive model threshold
                         min_speech_duration_ms=350,     # Catches very short words like "a" or "I"
-                        min_silence_duration_ms=1842,   # FASTER: Reduced from 4000ms to 1200ms for quicker interruption
+                        min_silence_duration_ms=3000,   # FASTER: Reduced from 4000ms to 1200ms for quicker interruption
                         speech_pad_ms=250              # Generous buffer at the end of your speech
                     )
                 ),

@@ -278,7 +278,7 @@ class StreamCallbackHandler:
             return "", ""
         
         # Common sentence ending patterns
-        sentence_endings = ['.', '!', '?', '...']
+        sentence_endings = ['.', '!', '?', ]
         
         # Find the last occurrence of any sentence ending
         last_ending_pos = -1

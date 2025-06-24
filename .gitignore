@@ -6,3 +6,6 @@ __pycache__/
 .vscode/
 backend/chroma_db/
 data/
+.pytest_cache/
+tasks/
+certs/
