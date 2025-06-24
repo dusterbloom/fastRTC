@@ -20,6 +20,7 @@ from ..audio import (
     BluetoothAudioProcessor, STTEngine, KokoroTTSEngine,
     VoiceMapper
 )
+from ..audio.user_identification import SpokenUserIdentifier
 from ..memory import AMemMemoryManager, ResponseCache, ConversationBuffer
 from ..services import LLMService, AsyncManager
 from src.config.settings import load_config
@@ -80,9 +81,10 @@ class VoiceAssistant:
 
         # Session and user tracking (set early for memory manager)
         print("[DEBUG] VoiceAssistant.__init__: Setting user ID and session ID")
-        self.user_id = "guest_user"  # Default until user identifies themselves
-        self.session_id = f"session_{self.user_id}"  # Persistent per user
+        self.user_id = "guest_user"  # Default guest user until identification
+        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         self.user_identified = False
+        self.identified_name = None  # Store the identified name separately
 
         # Initialize or use provided components
         print("[DEBUG] VoiceAssistant.__init__: Creating audio processor")
@@ -101,6 +103,8 @@ class VoiceAssistant:
         self.llm_service = llm_service or LLMService()
         print("[DEBUG] VoiceAssistant.__init__: Creating async manager")
         self.async_manager = async_manager or AsyncManager()
+        print("[DEBUG] VoiceAssistant.__init__: Creating voice print manager")
+        self.voice_print_manager = SpokenUserIdentifier()
 
         # Initialize memory manager with Qdrant setup
         print("[DEBUG] VoiceAssistant.__init__: About to setup memory manager")
@@ -130,7 +134,7 @@ class VoiceAssistant:
     
     def _setup_memory_manager(self) -> AMemMemoryManager:
         """
-        Set up the memory manager with user-specific configuration.
+        Set up the memory manager with consistent configuration.
         
         Returns:
             Configured AMemMemoryManager instance
@@ -518,9 +522,9 @@ class VoiceAssistant:
         
         logger.info(f"✅ Session reset complete. New session: {self.session_id}")
     
-    def identify_user(self, name: str) -> bool:
+    async def identify_user(self, name: str) -> bool:
         """
-        Identify user and switch to their persistent session.
+        Identify user and switch to their dedicated memory context.
         
         Args:
             name: User's name from speech ("My name is John")
@@ -535,31 +539,31 @@ class VoiceAssistant:
                 logger.warning(f"⚠️ Invalid username: {name}")
                 return False
             
-            # Create user ID from name
+            # Create user-specific user_id
             new_user_id = f"user_{clean_name}"
             
-            # Check if this is a new user
-            if new_user_id != self.user_id:
-                logger.info(f"👤 User identification: {name} -> {new_user_id}")
-                
-                # Store old session info for potential recovery
-                old_user_id = self.user_id
-                old_session_id = self.session_id
-                
-                # Switch to new user
+            # Check if we need to switch users
+            if new_user_id == self.user_id:
+                logger.info(f"👤 User already identified as: {name}")
+                return True
+            
+            logger.info(f"👤 Switching from '{self.user_id}' to '{new_user_id}' for user: {name}")
+            
+            # Switch memory manager to new user
+            if self.memory_manager.switch_user(new_user_id):
+                # Update user identification
                 self.user_id = new_user_id
-                self.session_id = f"session_{new_user_id}"
+                self.identified_name = name
                 self.user_identified = True
                 
-                # Reinitialize memory manager for new user
-                self._switch_user_memory(old_user_id, new_user_id)
+                # Reload memories for new user
+                await self.memory_manager.start_background_processor()
                 
-                logger.info(f"✅ Switched to user: {clean_name} (session: {self.session_id})")
+                logger.info(f"✅ Successfully identified and switched to user: {name}")
                 return True
             else:
-                logger.info(f"👤 User already identified as: {clean_name}")
-                self.user_identified = True
-                return True
+                logger.error(f"❌ Failed to switch memory manager to user: {name}")
+                return False
                 
         except Exception as e:
             logger.error(f"❌ User identification failed: {e}")
@@ -590,31 +594,6 @@ class VoiceAssistant:
         
         return clean if len(clean) >= 2 else ""
     
-    def _switch_user_memory(self, old_user_id: str, new_user_id: str):
-        """
-        Switch memory manager to new user.
-        
-        Args:
-            old_user_id: Previous user ID
-            new_user_id: New user ID
-        """
-        try:
-            logger.info(f"🧠 Switching memory from {old_user_id} to {new_user_id}")
-            
-            # Create new memory manager for the new user
-            old_memory_manager = self.memory_manager
-            self.memory_manager = self._setup_memory_manager()
-            
-            # Update memory manager's user ID
-            if hasattr(self.memory_manager, 'user_id'):
-                self.memory_manager.user_id = new_user_id
-            
-            logger.info(f"✅ Memory switched to user: {new_user_id}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to switch user memory: {e}")
-            # Fallback: keep old memory manager
-            logger.warning("⚠️ Keeping previous memory manager as fallback")
     
     def get_user_info(self) -> Dict[str, Any]:
         """
@@ -627,8 +606,9 @@ class VoiceAssistant:
             "user_id": self.user_id,
             "session_id": self.session_id,
             "identified": self.user_identified,
-            "is_guest": self.user_id.startswith("guest_"),
-            "display_name": self.user_id.replace("user_", "").replace("_", " ").title() if self.user_identified else "Guest"
+            "identified_name": self.identified_name,
+            "is_guest": not self.user_identified,
+            "display_name": self.identified_name if self.user_identified else "Guest"
         }
     
     def check_for_user_identification(self, user_text: str) -> bool:
@@ -641,9 +621,18 @@ class VoiceAssistant:
         Returns:
             True if user was identified from the text
         """
-        import re
+        # First try the SpokenUserIdentifier
+        identified_user_id = self.voice_print_manager.process_text(user_text)
+        if identified_user_id:
+            # Store the identified name without changing user_id
+            if not self.user_identified or self.identified_name != identified_user_id:
+                logger.info(f"👤 User identified via SpokenUserIdentifier: {identified_user_id}")
+                self.identified_name = identified_user_id
+                self.user_identified = True
+            return True
         
-        # Patterns for user identification
+        # Fallback to original pattern matching
+        import re
         name_patterns = [
             r"my name is (\w+(?:\s+\w+)?)",
             r"i am (\w+(?:\s+\w+)?)",
@@ -656,8 +645,19 @@ class VoiceAssistant:
             match = re.search(pattern, user_text.lower())
             if match:
                 name = match.group(1).strip()
-                if self.identify_user(name):
+                # Note: This will need to be called from an async context
+                # For now, we'll create a task to handle it
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    task = loop.create_task(self.identify_user(name))
+                    # We can't await here since this method isn't async
+                    # The identification will happen in the background
+                    logger.info(f"👤 User identification task created for: {name}")
                     return True
+                except Exception as e:
+                    logger.error(f"❌ Failed to create user identification task: {e}")
+                    return False
         
         return False
     
@@ -666,25 +666,17 @@ class VoiceAssistant:
         Callback when user is identified via voice recognition (background).
         
         Args:
-            user_id: Identified user ID
+            user_id: Identified user ID  
             name: User's name
             confidence: Recognition confidence
         """
         try:
-            # Only switch if it's a different user
-            if user_id != self.user_id:
+            # Store the identified name without changing core user_id
+            if not self.user_identified or self.identified_name != name:
                 logger.info(f"🎙️ Voice identified (background): {name} (confidence: {confidence:.3f})")
-                
-                # Switch user context
-                old_user_id = self.user_id
-                self.user_id = user_id
-                self.session_id = f"session_{user_id}"
+                self.identified_name = name
                 self.user_identified = True
-                
-                # Switch memory context
-                self._switch_user_memory(old_user_id, user_id)
-                
-                logger.info(f"✅ Switched to user: {name} via voice recognition")
+                logger.info(f"✅ User identified as: {name} via voice recognition")
         
         except Exception as e:
             logger.error(f"❌ Voice identification callback failed: {e}")
@@ -692,14 +684,16 @@ class VoiceAssistant:
     def process_audio_for_background_recognition(self, audio: np.ndarray, sample_rate: int = 16000):
         """
         Process audio for background voice recognition (non-blocking).
+        Note: SpokenUserIdentifier doesn't process audio directly, only text.
         
         Args:
             audio: Audio samples
             sample_rate: Audio sample rate
         """
         try:
-            # Add audio to background processing queue
-            self.voice_print_manager.add_audio_chunk(audio, sample_rate)
+            # SpokenUserIdentifier doesn't have add_audio_chunk method
+            # This is for text-based identification only
+            logger.debug("Background audio processing skipped - using text-based identification")
         except Exception as e:
             logger.debug(f"Background voice processing error: {e}")
     
@@ -746,6 +740,7 @@ class VoiceAssistant:
     def process_audio_for_voice_recognition(self, audio: np.ndarray, sample_rate: int = 16000) -> Optional[str]:
         """
         Process audio for voice-based user identification.
+        Note: SpokenUserIdentifier doesn't process audio directly, only text.
         
         Args:
             audio: Audio samples
@@ -755,31 +750,9 @@ class VoiceAssistant:
             User ID if identified, None otherwise
         """
         try:
-            # Skip if audio is too short
-            if len(audio) < sample_rate * 0.5:  # Less than 0.5 seconds
-                return None
-            
-            # Try to identify speaker
-            result = self.voice_print_manager.identify_speaker(audio, sample_rate)
-            
-            if result:
-                user_id, name, confidence = result
-                
-                # Switch to identified user if different
-                if user_id != self.user_id:
-                    logger.info(f"🎙️ Voice identified: {name} (confidence: {confidence:.3f})")
-                    
-                    # Update user identity
-                    old_user_id = self.user_id
-                    self.user_id = user_id
-                    self.session_id = f"session_{user_id}"
-                    self.user_identified = True
-                    
-                    # Switch memory context
-                    self._switch_user_memory(old_user_id, user_id)
-                    
-                    return user_id
-            
+            # SpokenUserIdentifier doesn't have identify_speaker method
+            # User identification happens via text processing in check_for_user_identification
+            logger.debug("Audio-based voice recognition not available - using text-based identification")
             return None
             
         except Exception as e:
@@ -788,7 +761,8 @@ class VoiceAssistant:
     
     def start_voice_enrollment(self, name: str) -> str:
         """
-        Start voice enrollment process for a user.
+        Start user registration process.
+        Note: SpokenUserIdentifier uses text-based identification, not voice samples.
         
         Args:
             name: User's name
@@ -797,22 +771,32 @@ class VoiceAssistant:
             Instructions for the user
         """
         try:
-            self.enrollment_mode = True
-            self.enrollment_samples = []
-            self.enrollment_target_name = name
-            
-            logger.info(f"🎙️ Starting voice enrollment for: {name}")
-            
-            return (f"Starting voice enrollment for {name}. "
-                   f"Please say a few sentences. I need at least 3 samples to learn your voice.")
+            # Register user with SpokenUserIdentifier
+            clean_name = self._normalize_username(name)
+            if clean_name and self.voice_print_manager.register_user(clean_name, name):
+                # Create task to switch to new user immediately
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    task = loop.create_task(self.identify_user(name))
+                    logger.info(f"👤 User registered and switching: {name}")
+                    return (f"Great! I've registered you as {name}. "
+                           f"From now on, you can say 'I am {name}' to identify yourself.")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create user switch task: {e}")
+                    return (f"Registered you as {name}, but couldn't switch users immediately. "
+                           f"Please say 'I am {name}' to activate your profile.")
+            else:
+                return "Sorry, I couldn't register that username."
                    
         except Exception as e:
-            logger.error(f"❌ Failed to start enrollment: {e}")
-            return "Sorry, I couldn't start voice enrollment."
+            logger.error(f"❌ Failed to register user: {e}")
+            return "Sorry, there was an error with user registration."
     
     def process_enrollment_audio(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
         """
         Process audio during enrollment.
+        Note: SpokenUserIdentifier doesn't use audio samples, only text-based identification.
         
         Args:
             audio: Audio samples
@@ -822,67 +806,22 @@ class VoiceAssistant:
             Status message for the user
         """
         try:
-            if not self.enrollment_mode:
-                return "Not in enrollment mode."
-            
-            # Skip if audio is too short
-            if len(audio) < sample_rate * 1.0:  # Less than 1 second
-                return "Please say something longer."
-            
-            # Add sample to enrollment
-            self.enrollment_samples.append((audio, sample_rate))
-            
-            remaining = max(0, 3 - len(self.enrollment_samples))
-            
-            if remaining > 0:
-                return f"Sample {len(self.enrollment_samples)} recorded. Need {remaining} more samples."
-            else:
-                # Enough samples, complete enrollment
-                return self._complete_enrollment()
+            # SpokenUserIdentifier doesn't use audio samples
+            return "Audio enrollment not supported. Use text-based identification instead."
                 
         except Exception as e:
             logger.error(f"❌ Enrollment audio processing failed: {e}")
             return "Sorry, there was an error processing your voice sample."
     
     def _complete_enrollment(self) -> str:
-        """Complete the voice enrollment process"""
+        """Complete the user registration process"""
         try:
-            if not self.enrollment_target_name or not self.enrollment_samples:
-                return "Enrollment data missing."
-            
-            # Enroll user with voice samples
-            success = self.voice_print_manager.enroll_user(
-                name=self.enrollment_target_name,
-                audio_samples=self.enrollment_samples
-            )
-            
-            if success:
-                # Switch to newly enrolled user
-                user_id = f"user_{self.enrollment_target_name.lower().replace(' ', '_')}"
-                old_user_id = self.user_id
-                
-                self.user_id = user_id
-                self.session_id = f"session_{user_id}"
-                self.user_identified = True
-                
-                # Switch memory context
-                self._switch_user_memory(old_user_id, user_id)
-                
-                # Clear enrollment state
-                self.enrollment_mode = False
-                self.enrollment_samples = []
-                self.enrollment_target_name = None
-                
-                logger.info(f"✅ Voice enrollment completed for: {self.enrollment_target_name}")
-                
-                return (f"Perfect! I've learned your voice, {self.enrollment_target_name}. "
-                       f"From now on, I'll recognize you automatically when you speak.")
-            else:
-                return "Sorry, voice enrollment failed. Please try again."
+            # SpokenUserIdentifier doesn't use audio samples
+            return "Audio enrollment not supported. Use text-based identification instead."
                 
         except Exception as e:
             logger.error(f"❌ Enrollment completion failed: {e}")
-            return "Sorry, there was an error completing your voice enrollment."
+            return "Sorry, there was an error completing your registration."
     
     def cancel_enrollment(self) -> str:
         """Cancel ongoing voice enrollment"""
@@ -895,11 +834,11 @@ class VoiceAssistant:
         """Get voice recognition system statistics"""
         try:
             stats = self.voice_print_manager.get_stats()
-            enrolled_users = self.voice_print_manager.get_enrolled_users()
+            users = self.voice_print_manager.get_users()
             
             return {
                 "system_stats": stats,
-                "enrolled_users": enrolled_users,
+                "registered_users": users,
                 "enrollment_mode": self.enrollment_mode,
                 "enrollment_samples_count": len(self.enrollment_samples) if self.enrollment_mode else 0
             }

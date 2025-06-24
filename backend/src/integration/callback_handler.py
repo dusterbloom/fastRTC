@@ -63,6 +63,9 @@ class StreamCallbackHandler:
         self.event_loop = event_loop
         self.adaptive_vad = adaptive_vad or SimpleSOTAAdaptiveVAD(VADConfig()) # Added initialization
         
+        # Sentence buffering for complete sentence detection
+        self.sentence_buffer = ""
+        
         # Language names mapping
         self.lang_names = LANGUAGE_NAMES
         self.lang_abbreviations = LANGUAGE_ABBREVIATIONS
@@ -136,7 +139,6 @@ class StreamCallbackHandler:
                     else:
                         audio_array = audio_array.astype(np.float32)
 
-                print(f"[AUDIO DIAG] Before resample: shape={audio_array.shape}, dtype={audio_array.dtype}, first10={audio_array[:10] if hasattr(audio_array, '__getitem__') else 'N/A'}")
 
                 # --- Resample to 16kHz mono if needed ---
                 TARGET_SAMPLE_RATE = 16000
@@ -145,7 +147,7 @@ class StreamCallbackHandler:
                     import numpy as np
                     num_samples = int(len(audio_array) * TARGET_SAMPLE_RATE / sample_rate)
                     audio_array = resample(audio_array, num_samples)
-                    print(f"[AUDIO DIAG] Resampled from {sample_rate}Hz to {TARGET_SAMPLE_RATE}Hz, new shape={audio_array.shape}, first10={audio_array[:10] if hasattr(audio_array, '__getitem__') else 'N/A'}")
+                    
                     sample_rate = TARGET_SAMPLE_RATE
             else:
                 audio_array = np.array([], dtype=np.float32)
@@ -236,14 +238,64 @@ class StreamCallbackHandler:
             transcription_result = None # Or some default TranscriptionResult
 
         # outputs is now a TranscriptionResult object
-        user_text = transcription_result.text.strip() if transcription_result and hasattr(transcription_result, 'text') else ""
+        current_text = transcription_result.text.strip() if transcription_result and hasattr(transcription_result, 'text') else ""
         print(f"[STT DEBUG] Transcription result: {transcription_result}")
         print(f"[STT DEBUG] Has text attribute: {hasattr(transcription_result, 'text') if transcription_result else False}")
         print(f"[STT DEBUG] Raw text: '{transcription_result.text if transcription_result and hasattr(transcription_result, 'text') else 'NO TEXT'}'")
+        
+        # Add current text to sentence buffer
+        if current_text:
+            self.sentence_buffer += (" " + current_text) if self.sentence_buffer else current_text
+        
+        # Extract complete sentences from buffer
+        complete_sentences, remaining_fragment = self._extract_complete_sentences(self.sentence_buffer)
+        
+        # Update buffer with remaining fragment
+        self.sentence_buffer = remaining_fragment
+        
+        # Only return complete sentences
+        user_text = complete_sentences
+        
+        print(f"[STT DEBUG] Current chunk: '{current_text}'")
+        print(f"[STT DEBUG] Buffer state: '{self.sentence_buffer}'")
+        print(f"[STT DEBUG] Complete sentences: '{complete_sentences}'")
         print(f"[STT DEBUG] Final user_text: '{user_text}' (length: {len(user_text)})")
         # (Removed verbose debug prints for cleaner terminal output)
         
         return user_text
+    
+    def _extract_complete_sentences(self, text: str) -> tuple[str, str]:
+        """
+        Extract complete sentences from text, maintaining incomplete fragments.
+        
+        Args:
+            text: Input text that may contain complete and incomplete sentences
+            
+        Returns:
+            Tuple of (complete_sentences, remaining_fragment)
+        """
+        if not text.strip():
+            return "", ""
+        
+        # Common sentence ending patterns
+        sentence_endings = ['.', '!', '?', '...']
+        
+        # Find the last occurrence of any sentence ending
+        last_ending_pos = -1
+        for ending in sentence_endings:
+            pos = text.rfind(ending)
+            if pos > last_ending_pos:
+                last_ending_pos = pos
+        
+        if last_ending_pos == -1:
+            # No sentence endings found, treat as incomplete fragment
+            return "", text.strip()
+        
+        # Split at the last sentence ending, include the punctuation
+        complete_part = text[:last_ending_pos + 1].strip()
+        remaining_part = text[last_ending_pos + 1:].strip()
+        
+        return complete_part, remaining_part
     
     
     def _get_kokoro_language(self, whisper_lang: str) -> str:

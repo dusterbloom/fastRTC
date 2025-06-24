@@ -50,7 +50,8 @@ class MemoryNote:
                  context: Optional[str] = None,
                  evolution_history: Optional[List] = None,
                  category: Optional[str] = None,
-                 tags: Optional[List[str]] = None):
+                 tags: Optional[List[str]] = None,
+                 user_id: Optional[str] = None):
         """Initialize a new memory note with its associated metadata.
         
         Args:
@@ -65,6 +66,7 @@ class MemoryNote:
             evolution_history (Optional[List]): Record of how the memory has evolved
             category (Optional[str]): Classification category
             tags (Optional[List[str]]): Additional classification tags
+            user_id (Optional[str]): User identifier for memory isolation
         """
         # Core content and ID
         self.content = content
@@ -85,35 +87,41 @@ class MemoryNote:
         # Usage and evolution data
         self.retrieval_count = retrieval_count or 0
         self.evolution_history = evolution_history or []
+        
+        # User identification
+        self.user_id = user_id
 
 class AgenticMemorySystem:
-    def get_user_context(self, user_id: str = "default") -> str:
+    def get_user_context(self, user_id: Optional[str] = None) -> str:
         """
         Retrieve long-term user context for LLM prompt with Redis caching.
         This should aggregate key facts, user info, and important memory notes.
         """
+        # Use the instance user_id if not provided
+        effective_user_id = user_id or self.user_id
+        
         # Try Redis cache first
         if self.cache:
-            cached_context = self.cache.get_user_context(user_id)
+            cached_context = self.cache.get_user_context(effective_user_id)
             if cached_context:
-                logger.debug(f"🚀 Cache hit for user context: {user_id}")
+                logger.debug(f"🚀 Cache hit for user context: {effective_user_id}")
                 return cached_context
         
         # Build context from memories
         user_context_notes = [
             note.content for note in self.memories.values()
-            if 'user_info' in getattr(note, 'tags', [])
+            if 'user_info' in getattr(note, 'tags', []) or 'personal_info' in getattr(note, 'tags', [])
         ]
         # Fallback: Use all notes if no user_info tag
         if not user_context_notes:
             user_context_notes = [note.content for note in self.memories.values()]
-        context = "\n".join(user_context_notes)
+        context = "\n".join(user_context_notes[:10])  # Limit to recent 10 for performance
         
         # Cache the result (only if substantial content)
         if self.cache and context and len(context) > 20:
-            self.cache.set_user_context(user_id, context, ttl=60)  # 1min TTL
+            self.cache.set_user_context(effective_user_id, context, ttl=60)  # 1min TTL
         
-        logger.debug(f"[A-MEM] get_user_context: {context[:100]}...")
+        logger.debug(f"[A-MEM] get_user_context for {effective_user_id}: {context[:100]}...")
         return context
     """Core memory system that manages memory notes and their evolution.
     
@@ -129,7 +137,8 @@ class AgenticMemorySystem:
                  llm_backend: str = "ollama",
                  llm_model: str = "llama3.2:3b",
                  evo_threshold: int = 10,
-                 api_key: Optional[str] = None):  
+                 api_key: Optional[str] = None,
+                 user_id: Optional[str] = None):  
         """Initialize the memory system.
         
         Args:
@@ -138,17 +147,20 @@ class AgenticMemorySystem:
             llm_model: Name of the LLM model
             evo_threshold: Number of memories before triggering evolution
             api_key: API key for the LLM service
+            user_id: User identifier for user-scoped memory isolation
         """
         print("[DEBUG] AgenticMemorySystem.__init__: Starting initialization")
         self.memories = {}
         self.model_name = model_name
+        self.user_id = user_id or "default_user"
         
-        # Create retriever with persistent storage
+        # Create retriever with persistent storage and user isolation
         print("[DEBUG] AgenticMemorySystem.__init__: About to create ChromaRetriever")
         self.retriever = ChromaRetriever(
             collection_name="memories",
             model_name=self.model_name,
-            persist_directory="backend/chroma_db"  # This will persist!
+            persist_directory="backend/chroma_db",  # This will persist!
+            user_id=self.user_id  # User-scoped collections
         )
         print("[DEBUG] AgenticMemorySystem.__init__: ChromaRetriever created successfully")
         
@@ -380,6 +392,9 @@ class AgenticMemorySystem:
     def add_note(self, content: str, time: str = None, **kwargs) -> str:
         if time is not None:
             kwargs['timestamp'] = time
+        # Ensure user_id is included in the note
+        if 'user_id' not in kwargs:
+            kwargs['user_id'] = self.user_id
         initial_note = MemoryNote(content=content, **kwargs)
         
         logger.info(f"DEBUG add_note: Initial Note ID {initial_note.id}, Content: '{initial_note.content[:30]}...', Category: {initial_note.category}, Tags: {initial_note.tags}")
@@ -390,7 +405,7 @@ class AgenticMemorySystem:
         
         # Invalidate user context cache when new memory is added
         if self.cache:
-            self.cache.invalidate_user_context("default")  # Could be user-specific later
+            self.cache.invalidate_user_context(self.user_id)
         
         metadata = {
             "id": processed_note.id, "content": processed_note.content,
@@ -398,7 +413,7 @@ class AgenticMemorySystem:
             "retrieval_count": processed_note.retrieval_count, "timestamp": processed_note.timestamp,
             "last_accessed": processed_note.last_accessed, "context": processed_note.context,
             "evolution_history": processed_note.evolution_history, "category": processed_note.category,
-            "tags": processed_note.tags 
+            "tags": processed_note.tags, "user_id": processed_note.user_id
         }
         logger.info(f"DEBUG add_note: Saving to Chroma. ID: {processed_note.id}, Content: '{processed_note.content[:30]}...', Category: {processed_note.category}, Final Tags for Chroma: {processed_note.tags}")
         self.retriever.add_document(processed_note.content, metadata, processed_note.id)
@@ -541,7 +556,8 @@ class AgenticMemorySystem:
                         context=metadata.get('context', 'General'),
                         evolution_history=json.loads(metadata.get('evolution_history', '[]')),
                         category=metadata.get('category', 'Uncategorized'),
-                        tags=loaded_tags # Use defensively parsed tags
+                        tags=loaded_tags, # Use defensively parsed tags
+                        user_id=metadata.get('user_id', self.user_id)  # Use stored user_id or default to current
                     )
                     self.memories[doc_id] = memory
                    
@@ -672,7 +688,8 @@ class AgenticMemorySystem:
             "context": note.context,
             "evolution_history": note.evolution_history, # Already a list
             "category": note.category,
-            "tags": note.tags          # Already a list
+            "tags": note.tags,          # Already a list
+            "user_id": note.user_id     # User identification
         }
         
         try:
@@ -803,7 +820,7 @@ class AgenticMemorySystem:
         
         # Try Redis cache first
         if self.cache:
-            cached_results = self.cache.get_search_results(query)
+            cached_results = self.cache.get_search_results(query, self.user_id)
             if cached_results:
                 logger.debug(f"🚀 Cache hit for query: {query[:50]}...")
                 return cached_results[:k]
@@ -881,7 +898,7 @@ class AgenticMemorySystem:
             
             # Cache the results
             if self.cache and memories:
-                self.cache.set_search_results(query, memories[:k])
+                self.cache.set_search_results(query, memories[:k], user_id=self.user_id)
             
             return memories[:k]
         except Exception as e:

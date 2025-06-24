@@ -36,13 +36,13 @@ class MemoryRedisCache:
         """Generate hash for query string."""
         return hashlib.md5(query.encode()).hexdigest()[:12]
     
-    def get_search_results(self, query: str) -> Optional[List[Dict[str, Any]]]:
-        """Get cached search results."""
+    def get_search_results(self, query: str, user_id: str = "default") -> Optional[List[Dict[str, Any]]]:
+        """Get cached search results for a specific user."""
         if not self.redis:
             return None
         
         try:
-            key = self._key(f"search:{self._hash_query(query)}")
+            key = self._key(f"search:{user_id}:{self._hash_query(query)}")
             cached = self.redis.get(key)
             if cached:
                 return json.loads(cached)
@@ -50,13 +50,13 @@ class MemoryRedisCache:
             logger.debug(f"Redis get error: {e}")
         return None
     
-    def set_search_results(self, query: str, results: List[Dict[str, Any]], ttl: int = 30):
-        """Cache search results with TTL."""
+    def set_search_results(self, query: str, results: List[Dict[str, Any]], ttl: int = 30, user_id: str = "default"):
+        """Cache search results with TTL for a specific user."""
         if not self.redis:
             return
         
         try:
-            key = self._key(f"search:{self._hash_query(query)}")
+            key = self._key(f"search:{user_id}:{self._hash_query(query)}")
             self.redis.setex(key, ttl, json.dumps(results))
         except Exception as e:
             logger.debug(f"Redis set error: {e}")

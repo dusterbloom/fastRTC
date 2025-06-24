@@ -62,15 +62,39 @@ class OllamaEmbeddingFunction:
 
 class ChromaRetriever:
     """Vector database retrieval using ChromaDB with PERSISTENT storage"""
+    
+    @staticmethod
+    def get_user_collection_name(user_id: str, base_name: str = "memories") -> str:
+        """Generate user-scoped collection name.
+        
+        Args:
+            user_id: User identifier
+            base_name: Base collection name
+            
+        Returns:
+            User-scoped collection name
+        """
+        # Sanitize user_id for ChromaDB collection name (alphanumeric + underscore)
+        sanitized_user_id = "".join(c for c in user_id if c.isalnum() or c == "_")
+        return f"{base_name}_user_{sanitized_user_id}"
+    
     def __init__(self, collection_name: str = "memories", model_name: str = "nomic-embed-text:latest",
-                 persist_directory: str = "backend/chroma_db"):
+                 persist_directory: str = "backend/chroma_db", user_id: Optional[str] = None):
         """Initialize ChromaDB retriever with persistent storage.
         
         Args:
-            collection_name: Name of the ChromaDB collection
+            collection_name: Base name of the ChromaDB collection
             model_name: Name of the embedding model
             persist_directory: Directory to persist ChromaDB data
+            user_id: User identifier for user-scoped collections (optional)
         """
+        # If user_id is provided, create user-scoped collection name
+        if user_id:
+            collection_name = self.get_user_collection_name(user_id, collection_name)
+            logger.info(f"🔧 Using user-scoped collection: {collection_name} for user: {user_id}")
+        
+        self.user_id = user_id
+        self.base_collection_name = "memories" if collection_name.startswith("memories_user_") else collection_name
         print(f"[DEBUG] ChromaRetriever.__init__: Starting with persist_directory={persist_directory}")
         # Create persist directory if it doesn't exist
         os.makedirs(persist_directory, exist_ok=True)

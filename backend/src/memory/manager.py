@@ -87,7 +87,8 @@ class AMemMemoryManager(MemoryManager):
                 model_name=amem_model,
                 llm_backend=llm_backend,
                 llm_model=llm_model,
-                evo_threshold=evo_threshold
+                evo_threshold=evo_threshold,
+                user_id=self.user_id  # Pass user_id for user-scoped memory
             )
             print("[DEBUG] AMemMemoryManager.__init__: AgenticMemorySystem created successfully")
             logger.info("🧠 A-MEM system initialized successfully")
@@ -99,6 +100,71 @@ class AMemMemoryManager(MemoryManager):
         # Don't load existing memories during __init__ - do it async later
         self._memories_loaded = False
         logger.info("🧠 A-MEM memory manager initialized (memories will be loaded async)")
+    
+    def switch_user(self, new_user_id: str) -> bool:
+        """Switch to a different user while maintaining the same manager instance.
+        
+        Args:
+            new_user_id: New user identifier to switch to
+            
+        Returns:
+            bool: True if switch was successful, False otherwise
+        """
+        if new_user_id == self.user_id:
+            logger.info(f"🔄 User already set to: {new_user_id}")
+            return True
+            
+        try:
+            logger.info(f"🔄 Switching memory manager from user '{self.user_id}' to '{new_user_id}'")
+            
+            # Update user_id
+            old_user_id = self.user_id
+            self.user_id = new_user_id
+            
+            # Update A-MEM system user_id
+            self.amem_system.user_id = new_user_id
+            
+            # Create new user-scoped retriever
+            from ..a_mem.retrievers import ChromaRetriever
+            self.amem_system.retriever = ChromaRetriever(
+                collection_name="memories",
+                model_name=self.amem_system.model_name,
+                persist_directory="backend/chroma_db",
+                user_id=new_user_id
+            )
+            
+            # Clear in-memory cache and reset loaded flag
+            self.amem_system.memories.clear()
+            self._memories_loaded = False
+            
+            # Load memories for the new user
+            try:
+                self.amem_system._load_memories_from_chromadb()
+                logger.info(f"✅ Loaded memories for user: {new_user_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load memories for user {new_user_id}: {e}")
+            
+            # Clear local memory cache 
+            self.memory_cache = {
+                'user_name': None, 
+                'preferences': {}, 
+                'facts': {}, 
+                'last_updated': None
+            }
+            
+            # Mark as loaded for the new user
+            self._memories_loaded = True
+            
+            logger.info(f"✅ Successfully switched memory manager to user: {new_user_id}")
+            logger.info(f"✅ New collection: {self.amem_system.retriever.collection.name}")
+            logger.info(f"✅ Loaded {len(self.amem_system.memories)} memories for {new_user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to switch user from '{old_user_id}' to '{new_user_id}': {e}")
+            # Revert user_id on failure
+            self.user_id = old_user_id
+            return False
     
     async def start_background_processor(self):
         """Start the background memory processing task."""
