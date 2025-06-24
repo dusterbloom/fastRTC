@@ -11,6 +11,7 @@ import numpy as np
 from datetime import datetime, timezone
 from typing import Tuple, Generator, Any, Optional
 from fastrtc import AdditionalOutputs
+import threading
 
 from ..core.interfaces import TranscriptionResult # Added import
 from ..audio import STTEngine, KokoroTTSEngine, VoiceMapper
@@ -65,6 +66,10 @@ class StreamCallbackHandler:
         
         # Sentence buffering for complete sentence detection
         self.sentence_buffer = ""
+        self.buffer_timestamp = None
+        self.buffer_timeout = 3.0  # seconds
+        self.buffer_lock = threading.Lock()
+        self.max_buffer_length = 500  # characters
         
         # Language names mapping
         self.lang_names = LANGUAGE_NAMES
@@ -184,9 +189,15 @@ class StreamCallbackHandler:
             user_text = self._process_speech_to_text(audio_array, sample_rate)
             # (Removed verbose debug prints for cleaner terminal output)
             
+            # Check for buffered content even if current user_text is empty
             if not user_text.strip():
-                yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
-                return
+                # Check if we have buffered content that should be processed due to timeout
+                buffered_content = self._check_buffer_timeout()
+                if buffered_content.strip():
+                    user_text = buffered_content
+                else:
+                    yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
+                    return
             
             # Update statistics
             self.voice_assistant.voice_detection_successes += 1
@@ -243,23 +254,41 @@ class StreamCallbackHandler:
         print(f"[STT DEBUG] Has text attribute: {hasattr(transcription_result, 'text') if transcription_result else False}")
         print(f"[STT DEBUG] Raw text: '{transcription_result.text if transcription_result and hasattr(transcription_result, 'text') else 'NO TEXT'}'")
         
-        # Add current text to sentence buffer
-        if current_text:
-            self.sentence_buffer += (" " + current_text) if self.sentence_buffer else current_text
+        # Thread-safe buffer management
+        with self.buffer_lock:
+            # Add current text to sentence buffer
+            if current_text:
+                # Check buffer size limit
+                if len(self.sentence_buffer) + len(current_text) > self.max_buffer_length:
+                    logger.warning(f"Buffer size limit reached, clearing buffer (was {len(self.sentence_buffer)} chars)")
+                    self.sentence_buffer = current_text  # Start fresh with current text
+                else:
+                    self.sentence_buffer += (" " + current_text) if self.sentence_buffer else current_text
+                
+                # Update timestamp when new content is added
+                self.buffer_timestamp = time.time()
+            
+            # Extract complete sentences from buffer
+            complete_sentences, remaining_fragment = self._extract_complete_sentences(self.sentence_buffer)
+            
+            # Update buffer with remaining fragment
+            self.sentence_buffer = remaining_fragment
+            
+            # Clear timestamp if buffer is empty
+            if not self.sentence_buffer:
+                self.buffer_timestamp = None
         
-        # Extract complete sentences from buffer
-        complete_sentences, remaining_fragment = self._extract_complete_sentences(self.sentence_buffer)
-        
-        # Update buffer with remaining fragment
-        self.sentence_buffer = remaining_fragment
-        
-        # Only return complete sentences
+        # Return complete sentences, or handle timeout case
         user_text = complete_sentences
         
         print(f"[STT DEBUG] Current chunk: '{current_text}'")
-        print(f"[STT DEBUG] Buffer state: '{self.sentence_buffer}'")
+        print(f"[STT DEBUG] Buffer state: '{self.sentence_buffer}' (length: {len(self.sentence_buffer)})")
+        print(f"[STT DEBUG] Buffer timestamp: {self.buffer_timestamp}")
         print(f"[STT DEBUG] Complete sentences: '{complete_sentences}'")
         print(f"[STT DEBUG] Final user_text: '{user_text}' (length: {len(user_text)})")
+        if self.sentence_buffer and self.buffer_timestamp:
+            buffer_age = time.time() - self.buffer_timestamp
+            print(f"[STT DEBUG] Buffer age: {buffer_age:.2f}s (timeout: {self.buffer_timeout}s)")
         # (Removed verbose debug prints for cleaner terminal output)
         
         return user_text
@@ -267,6 +296,7 @@ class StreamCallbackHandler:
     def _extract_complete_sentences(self, text: str) -> tuple[str, str]:
         """
         Extract complete sentences from text, maintaining incomplete fragments.
+        Enhanced to handle conversational patterns and edge cases.
         
         Args:
             text: Input text that may contain complete and incomplete sentences
@@ -277,26 +307,104 @@ class StreamCallbackHandler:
         if not text.strip():
             return "", ""
         
-        # Common sentence ending patterns
-        sentence_endings = ['.', '!', '?', ]
+        # Enhanced sentence ending patterns for conversational speech
+        sentence_endings = ['.', '!', '?', '...', ', right?', ', you know?', ', okay?']
         
-        # Find the last occurrence of any sentence ending
+        # Conversational completeness indicators
+        conversational_endings = [
+            ', right', ', okay', ', you know', ', yeah', ', sure', 
+            ' though', ' then', ' so', ' well', ' actually'
+        ]
+        
+        # Find the last occurrence of any strong sentence ending
         last_ending_pos = -1
+        ending_found = None
         for ending in sentence_endings:
             pos = text.rfind(ending)
             if pos > last_ending_pos:
                 last_ending_pos = pos
+                ending_found = ending
         
+        # If no strong ending found, check for conversational patterns
         if last_ending_pos == -1:
-            # No sentence endings found, treat as incomplete fragment
+            # Check for conversational completeness indicators
+            for ending in conversational_endings:
+                if text.lower().endswith(ending.lower()):
+                    # Treat as complete if it seems like a conversational turn
+                    words = text.split()
+                    if len(words) >= 3:  # Minimum words for complete thought
+                        return text.strip(), ""
+            
+            # No clear ending, but check if text seems long enough to be complete
+            words = text.split()
+            if len(words) >= 8:  # Long enough phrase might be complete
+                # Look for natural break points (commas, "and", "but", etc.)
+                break_words = ['and', 'but', 'so', 'then', 'because', 'since', 'while']
+                for i, word in enumerate(reversed(words[-4:])):
+                    if word.lower() in break_words and len(words) - i >= 4:
+                        # Found a natural break point near the end
+                        break_point = len(words) - i
+                        complete_part = ' '.join(words[:break_point]).strip()
+                        remaining_part = ' '.join(words[break_point:]).strip()
+                        return complete_part, remaining_part
+            
+            # Still no clear completion, treat as incomplete fragment
             return "", text.strip()
         
-        # Split at the last sentence ending, include the punctuation
-        complete_part = text[:last_ending_pos + 1].strip()
-        remaining_part = text[last_ending_pos + 1:].strip()
+        # Found a strong sentence ending
+        complete_part = text[:last_ending_pos + len(ending_found)].strip()
+        remaining_part = text[last_ending_pos + len(ending_found):].strip()
         
         return complete_part, remaining_part
     
+    def _check_buffer_timeout(self) -> str:
+        """
+        Check if buffered content should be processed due to timeout.
+        
+        Returns:
+            Buffered content if timeout occurred, empty string otherwise
+        """
+        with self.buffer_lock:
+            if not self.sentence_buffer or not self.buffer_timestamp:
+                return ""
+            
+            # Check if buffer has timed out
+            if time.time() - self.buffer_timestamp > self.buffer_timeout:
+                logger.info(f"[STT TIMEOUT] Processing buffered content due to timeout: '{self.sentence_buffer}'")
+                content = self.sentence_buffer
+                self.sentence_buffer = ""
+                self.buffer_timestamp = None
+                return content
+            
+            return ""
+    
+    def clear_sentence_buffer(self):
+        """
+        Manually clear the sentence buffer and reset timestamp.
+        Useful for resetting state between conversations.
+        """
+        with self.buffer_lock:
+            if self.sentence_buffer:
+                logger.info(f"[STT BUFFER] Manually clearing buffer: '{self.sentence_buffer}'")
+            self.sentence_buffer = ""
+            self.buffer_timestamp = None
+    
+    def get_buffer_status(self) -> dict:
+        """
+        Get current buffer status for debugging/monitoring.
+        
+        Returns:
+            Dictionary with buffer information
+        """
+        with self.buffer_lock:
+            return {
+                'buffer_content': self.sentence_buffer,
+                'buffer_length': len(self.sentence_buffer),
+                'buffer_timestamp': self.buffer_timestamp,
+                'buffer_age': time.time() - self.buffer_timestamp if self.buffer_timestamp else None,
+                'timeout_seconds': self.buffer_timeout,
+                'max_length': self.max_buffer_length
+            }
     
     def _get_kokoro_language(self, whisper_lang: str) -> str:
         """

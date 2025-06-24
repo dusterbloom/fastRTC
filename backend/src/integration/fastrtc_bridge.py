@@ -58,7 +58,7 @@ class FastRTCBridge:
                 ReplyOnPause(
                     callback_function,
                     can_interrupt=True,
-                       algo_options=AlgoOptions(
+                    algo_options=AlgoOptions(
                         # This is the GATEKEEPER. We are making it extremely sensitive.
                         speech_threshold=0.5,  # Drastically lower: will detect even quiet speech.
                         started_talking_threshold=0.10,
