@@ -34,11 +34,17 @@ class SpokenUserIdentifier:
         # Default activation phrases in multiple languages
         if activation_phrases is None:
             self.activation_phrases = [
-                # English
-                r"i am (\w+)",
+                # English - Core patterns
+                r"(?:^|\s)i am (\w+)(?:\s*$|[.!?])",
+                r"i'm (\w+)",
                 r"my (?:name|id) is (\w+)",
                 r"this is (\w+)",
                 r"user (\w+)",
+                r"it's (\w+)",
+                # English - Natural variations  
+                r"(?:hi|hello|hey),?\s*i'?m (\w+)",
+                r"(?:hi|hello|hey),?\s*i am (\w+)",
+                r"(?:hi|hello|hey),?\s*this is (\w+)",
                 # Spanish
                 r"soy (\w+)",
                 r"mi nombre es (\w+)",
@@ -162,6 +168,8 @@ class SpokenUserIdentifier:
                 
                 return user_id
         
+        # Log when no identification patterns match for debugging
+        logger.debug(f"🔍 No user identification patterns matched for text: '{text}'")
         return None
     
     def set_user_identified_callback(self, callback: Callable[[str], None]):

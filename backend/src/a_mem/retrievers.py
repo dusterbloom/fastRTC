@@ -195,9 +195,10 @@ class ChromaRetriever:
         """
         # User validation: ensure metadata matches current user
         if self.user_id and metadata.get('user_id') != self.user_id:
-            logger.warning(f"⚠️ User validation failed: trying to add document for user {metadata.get('user_id')} but current user is {self.user_id}")
+            logger.warning(f"⚠️ User validation failed: trying to add document for user {metadata.get('user_id')} but current user is {self.user_id}. Correcting to current user.")
             metadata = dict(metadata)  # Make a copy to avoid modifying original
             metadata['user_id'] = self.user_id  # Force correct user_id
+            logger.info(f"✅ Memory will be stored under correct user: {self.user_id}")
         
         # Convert MemoryNote object to serializable format
         processed_metadata = {}

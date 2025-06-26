@@ -106,6 +106,55 @@ class OllamaController(BaseLLMController):
                         if len(lines) > 2 and lines[0].startswith('```') and lines[-1].strip() == '```':
                             cleaned_result = '\n'.join(lines[1:-1])
                     
+                    # Additional cleaning for common LLM issues
+                    cleaned_result = cleaned_result.strip()
+                    
+                    # Remove any trailing commas before closing braces/brackets
+                    import re
+                    cleaned_result = re.sub(r',(\s*[}\]])', r'\1', cleaned_result)
+                    
+                    # Remove any text before the first { or [
+                    first_brace = cleaned_result.find('{')
+                    first_bracket = cleaned_result.find('[')
+                    
+                    start_pos = -1
+                    if first_brace != -1 and first_bracket != -1:
+                        start_pos = min(first_brace, first_bracket)
+                    elif first_brace != -1:
+                        start_pos = first_brace
+                    elif first_bracket != -1:
+                        start_pos = first_bracket
+                    
+                    if start_pos > 0:
+                        cleaned_result = cleaned_result[start_pos:]
+                    
+                    # Remove any text after the last } or ]
+                    last_brace = cleaned_result.rfind('}')
+                    last_bracket = cleaned_result.rfind(']')
+                    
+                    end_pos = -1
+                    if last_brace != -1 and last_bracket != -1:
+                        end_pos = max(last_brace, last_bracket)
+                    elif last_brace != -1:
+                        end_pos = last_brace
+                    elif last_bracket != -1:
+                        end_pos = last_bracket
+                    
+                    if end_pos != -1 and end_pos < len(cleaned_result) - 1:
+                        cleaned_result = cleaned_result[:end_pos + 1]
+                    
+                    # Try to find JSON object/array if still embedded in text
+                    if not (cleaned_result.startswith('{') or cleaned_result.startswith('[')):
+                        # Look for JSON object in the text
+                        json_match = re.search(r'(\{.*\})', cleaned_result, re.DOTALL)
+                        if json_match:
+                            cleaned_result = json_match.group(1)
+                        else:
+                            # Look for JSON array
+                            json_match = re.search(r'(\[.*\])', cleaned_result, re.DOTALL)
+                            if json_match:
+                                cleaned_result = json_match.group(1)
+                    
                     # Test if it's valid JSON
                     json.loads(cleaned_result)
                     return cleaned_result

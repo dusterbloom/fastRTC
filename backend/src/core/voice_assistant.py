@@ -85,8 +85,10 @@ class VoiceAssistant:
 
         # Session and user tracking (set early for memory manager)
         logger.debug("VoiceAssistant.__init__: Setting user ID and session ID")
-        self.user_id = "guest_user"  # Default guest user until identification
-        self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        # Generate a unique session-based user ID until proper identification
+        session_timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        self.user_id = f"session_user_{session_timestamp}"  # Unique session-based user ID
+        self.session_id = f"session_{session_timestamp}"
         self.user_identified = False
         self.identified_name = None  # Store the identified name separately
 
@@ -299,6 +301,27 @@ class VoiceAssistant:
         """
         # Log user input prominently
         conversation_logger.log_user_input(user_text)
+        
+        # Check for user identification first
+        logger.debug(f"🔍 Checking user identification for text: '{user_text[:100]}...'")
+        identified_user_id = self.voice_print_manager.process_text(user_text)
+        logger.debug(f"🔍 Identification result: {identified_user_id} (current user: {self.user_id})")
+        if identified_user_id and identified_user_id != self.user_id:
+            logger.info(f"🔄 User identification detected: switching from '{self.user_id}' to '{identified_user_id}'")
+            
+            # Update user ID
+            self.user_id = identified_user_id
+            self.user_identified = True
+            self.identified_name = identified_user_id.replace("user_", "")
+            
+            # Switch memory manager to new user
+            if self.memory_manager.switch_user(identified_user_id):
+                logger.info(f"✅ Memory manager switched to user: {identified_user_id}")
+                # Return a confirmation message for user identification
+                return f"Hello {self.identified_name}! I've switched to your personal memory profile."
+            else:
+                logger.error(f"❌ Failed to switch memory manager to user: {identified_user_id}")
+                return "I recognized you, but there was an issue accessing your personal profile. Let me try to help anyway."
         
         # Check cache first
         cached_response = self.get_cached_response(user_text) # In VoiceAssistant

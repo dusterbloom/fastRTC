@@ -92,6 +92,30 @@ class MemoryNote:
         self.user_id = user_id
 
 class AgenticMemorySystem:
+    def set_user_id(self, new_user_id: str):
+        """
+        Updates the user ID for the memory system and re-initializes the retriever
+        to ensure user-scoped memory isolation.
+        """
+        if new_user_id == self.user_id:
+            logger.info(f"User ID already set to {new_user_id}. No change needed.")
+            return
+
+        logger.info(f"Switching AgenticMemorySystem user from {self.user_id} to {new_user_id}")
+        self.user_id = new_user_id
+        
+        # Re-initialize retriever with the new user_id
+        self.retriever = ChromaRetriever(
+            collection_name="memories",
+            model_name=self.model_name,
+            persist_directory=None,  # Use default absolute path
+            user_id=self.user_id  # New user-scoped collection
+        )
+        
+        # Clear in-memory memories as they belong to the old user
+        self.memories.clear()
+        logger.info(f"AgenticMemorySystem memories cleared for new user {new_user_id}.")
+
     def get_user_context(self, user_id: Optional[str] = None) -> str:
         """
         Retrieve long-term user context for LLM prompt with Redis caching.
@@ -152,7 +176,7 @@ class AgenticMemorySystem:
         logger.debug("AgenticMemorySystem.__init__: Starting initialization")
         self.memories = {}
         self.model_name = model_name
-        self.user_id = user_id or "default_user"
+        self.user_id = user_id or "unknown_user"
         
         # Create retriever with persistent storage and user isolation
         logger.debug("AgenticMemorySystem.__init__: About to create ChromaRetriever")
@@ -302,17 +326,7 @@ class AgenticMemorySystem:
                                     The outer list length MUST match `neighbor_number`.
                                     Example: `[["evolved_tag_same_person"], ["original_tags_different_person"], ["original_tags_no_evolution"]]`
 
-                                JSON OUTPUT FORMAT:
-                                Return your decision in JSON format (this below is an example DO NOT RETURN THIS PLEASE):
-                                {{
-                                    "should_evolve": true,
-                                    "actions": ["strengthen", "update_neighbor"],
-                                    "suggested_connections": ["xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"],
-                                    "new_note_refined_tags": ["socrates_interest", "philosophy_enthusiasm"],
-                                    "new_note_refined_context": "User expressed deep interest in Socrates and ancient philosophy.",
-                                    "new_context_neighborhood": ["Updated precise context for neighbor 0.", "Original context from input.", "Original context from input."],
-                                    "new_tags_neighborhood": [["ancient_philosophy"], ["original_tag_from_input"], ["evolved_specific_tag"]]
-                                }}
+                                IMPORTANT: Your response will be automatically parsed as JSON. Focus on the logic and content of your decision.
                                 '''
         
     def analyze_content(self, content: str) -> Dict:            
@@ -337,26 +351,10 @@ class AgenticMemorySystem:
             2. Extracting core themes and contextual elements
             3. Creating relevant categorical tags
 
-            Format the response as a JSON object:
-            {
-                "keywords": [
-                    // several specific, distinct keywords that capture key concepts and terminology
-                    // Order from most to least important
-                    // Don't include keywords that are the name of the speaker or time
-                    // At least three keywords, but don't be too redundant.
-                ],
-                "context": 
-                    // one sentence summarizing:
-                    // - Main topic/domain
-                    // - Key arguments/points
-                    // - Intended audience/purpose
-                ,
-                "tags": [
-                    // several broad categories/themes for classification
-                    // Include domain, format, and type tags
-                    // At least three tags, but don't be too redundant.
-                ]
-            }
+            Provide three key components:
+            1. Keywords: Specific terms and concepts (focus on nouns, verbs, key concepts)
+            2. Context: One sentence summarizing the main topic, key points, and purpose
+            3. Tags: Broad categories for classification (domain, format, type tags)
 
             Content for analysis:
             """ + content
@@ -426,8 +424,12 @@ class AgenticMemorySystem:
 
     def consolidate_memories(self):
         """Consolidate memories: update retriever with new documents"""
-        # Reset ChromaDB collection
-        self.retriever = ChromaRetriever(collection_name="memories",model_name=self.model_name)
+        # Reset ChromaDB collection with user isolation
+        self.retriever = ChromaRetriever(
+            collection_name="memories",
+            model_name=self.model_name,
+            user_id=self.user_id
+        )
         
         # Re-add all memory documents with their complete metadata
         for memory in self.memories.values():
@@ -442,7 +444,8 @@ class AgenticMemorySystem:
                 "context": memory.context,
                 "evolution_history": memory.evolution_history,
                 "category": memory.category,
-                "tags": memory.tags
+                "tags": memory.tags,
+                "user_id": memory.user_id or self.user_id
             }
             self.retriever.add_document(memory.content, metadata, memory.id)
     
@@ -1019,7 +1022,19 @@ class AgenticMemorySystem:
                         "new_tags_neighborhood": []
                     }
                 else:
-                    response_json = json.loads(response_str)
+                    try:
+                        response_json = json.loads(response_str)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"⚠️ Failed to parse LLM JSON response for note {note.id}: {e}. Response was: {response_str[:200]}...")
+                        response_json = {
+                            "should_evolve": False,
+                            "actions": [],
+                            "suggested_connections": [],
+                            "new_note_refined_tags": [],
+                            "new_note_refined_context": "",
+                            "new_context_neighborhood": [],
+                            "new_tags_neighborhood": []
+                        }
                 
                 should_evolve = response_json.get("should_evolve", False)
                 logger.info(f"DEBUG process_memory: LLM Evolution response for note {note.id}: {response_json}")

@@ -149,6 +149,40 @@ class StreamingPipeline:
             if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
                 logger.debug(f"🧠 Step 4: Starting LLM streaming for: '{user_text}'")
             
+            # Check for user identification first
+            logger.debug(f"🔍 [STREAMING] Checking user identification for text: '{user_text[:100]}...'")
+            identified_user_id = self.voice_assistant.voice_print_manager.process_text(user_text)
+            logger.debug(f"🔍 [STREAMING] Identification result: {identified_user_id} (current user: {self.voice_assistant.user_id})")
+            
+            if identified_user_id and identified_user_id != self.voice_assistant.user_id:
+                logger.info(f"🔄 [STREAMING] User identification detected: switching from '{self.voice_assistant.user_id}' to '{identified_user_id}'")
+                
+                # Update user ID
+                self.voice_assistant.user_id = identified_user_id
+                self.voice_assistant.user_identified = True
+                self.voice_assistant.identified_name = identified_user_id.replace("user_", "")
+                
+                # Switch memory manager to new user
+                if self.voice_assistant.memory_manager.switch_user(identified_user_id):
+                    logger.info(f"✅ [STREAMING] Memory manager switched to user: {identified_user_id}")
+                    # Return confirmation message for user identification
+                    confirmation_message = f"Hello {self.voice_assistant.identified_name}! I've switched to your personal memory profile."
+                    
+                    # Stream the confirmation message immediately
+                    current_language = self.voice_assistant.current_language
+                    available_voices = self.voice_mapper.get_voices_for_language(current_language)
+                    voice_id = available_voices[0] if available_voices else None
+                    
+                    async for sample_rate, audio_chunk in self.tts_engine.stream_synthesis_async(
+                        confirmation_message, voice_id, current_language
+                    ):
+                        if isinstance(audio_chunk, np.ndarray) and audio_chunk.size > 0:
+                            yield (sample_rate, audio_chunk), AdditionalOutputs()
+                    return
+                else:
+                    logger.error(f"❌ [STREAMING] Failed to switch memory manager to user: {identified_user_id}")
+                    # Continue with normal processing but log the error
+            
             # Get streaming LLM response
             async for token in self.voice_assistant.llm_service.stream_response(user_text):
                 sentence_buffer += token

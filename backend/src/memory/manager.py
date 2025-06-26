@@ -121,28 +121,19 @@ class AMemMemoryManager(MemoryManager):
             old_user_id = self.user_id
             self.user_id = new_user_id
             
-            # Update A-MEM system user_id
-            self.amem_system.user_id = new_user_id
-            
-            # Create new user-scoped retriever
-            from ..a_mem.retrievers import ChromaRetriever
-            self.amem_system.retriever = ChromaRetriever(
-                collection_name="memories",
-                model_name=self.amem_system.model_name,
-                persist_directory=None,  # Use default absolute path
-                user_id=new_user_id
-            )
+            # Use the new set_user_id method in AgenticMemorySystem
+            self.amem_system.set_user_id(new_user_id)
             
             # Clear in-memory cache and reset loaded flag
-            self.amem_system.memories.clear()
             self._memories_loaded = False
             
             # Load memories for the new user
             try:
                 self.amem_system._load_memories_from_chromadb()
-                logger.info(f"✅ Loaded memories for user: {new_user_id}")
+                logger.info(f"✅ Loaded {len(self.amem_system.memories)} memories for user: {new_user_id}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to load memories for user {new_user_id}: {e}")
+                # Continue even if loading fails - new memories can still be created
             
             # Clear local memory cache 
             self.memory_cache = {
@@ -187,12 +178,12 @@ class AMemMemoryManager(MemoryManager):
         logger.info("Background A-MEM processor listening...")
         while True:
             try:
-                op, user_text, assistant_text, category = await self.memory_queue.get()
+                op, user_text, assistant_text, category, user_id_for_note = await self.memory_queue.get()
                 try:
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(
                         self.executor, self._store_memory_background,
-                        user_text, assistant_text, category
+                        user_text, assistant_text, category, user_id_for_note
                     )
                 except Exception as processing_error:
                     logger.error(f"❌ Error during background A-MEM storage execution: {processing_error}")
@@ -546,12 +537,12 @@ class AMemMemoryManager(MemoryManager):
         logger.debug(f"[DEBUG] After update_local_cache, memory_cache: {self.memory_cache}")
         
         if self.memory_queue:
-            await self.memory_queue.put(('add', user_text, assistant_text, category))
+            await self.memory_queue.put(('add', user_text, assistant_text, category, self.user_id))
         else:
             logger.warning("⚠️ Memory queue not available, attempting direct threaded storage (fallback).")
             threading.Thread(
                 target=self._store_memory_background,
-                args=(user_text, assistant_text, category),
+                args=(user_text, assistant_text, category, self.user_id),
                 daemon=True
             ).start()
         
@@ -597,13 +588,14 @@ class AMemMemoryManager(MemoryManager):
         
         return category
     
-    def _store_memory_background(self, user_text: str, assistant_text: str, category: str):
+    def _store_memory_background(self, user_text: str, assistant_text: str, category: str, current_user_id: str):
         """Store memory in background thread.
         
         Args:
             user_text: User's input text
             assistant_text: Assistant's response text
             category: Memory category
+            current_user_id: The user ID to associate with this memory
         """
         try:
             conversation_content = f"User: {user_text}\nAssistant: {assistant_text}"
@@ -611,9 +603,10 @@ class AMemMemoryManager(MemoryManager):
                 content=conversation_content,
                 tags=[category, "conversation"],
                 category=category,
-                timestamp=datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+                timestamp=datetime.now(timezone.utc).strftime("%Y%m%d%H%M"),
+                user_id=current_user_id  # Pass the explicit user_id
             )
-            logger.info(f"✅ Stored memory in A-MEM: {memory_id}")
+            logger.info(f"✅ Stored memory in A-MEM: {memory_id} for user: {current_user_id}")
         except Exception as e:
             logger.error(f"❌ Background A-MEM storage failed: {e}")
     
