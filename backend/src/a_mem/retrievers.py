@@ -194,6 +194,12 @@ class ChromaRetriever:
             metadata: Dictionary of metadata
             doc_id: Unique identifier for the document
         """
+        # User validation: ensure metadata matches current user
+        if self.user_id and metadata.get('user_id') != self.user_id:
+            logger.warning(f"⚠️ User validation failed: trying to add document for user {metadata.get('user_id')} but current user is {self.user_id}")
+            metadata = dict(metadata)  # Make a copy to avoid modifying original
+            metadata['user_id'] = self.user_id  # Force correct user_id
+        
         # Convert MemoryNote object to serializable format
         processed_metadata = {}
         for key, value in metadata.items():
@@ -209,6 +215,7 @@ class ChromaRetriever:
             metadatas=[processed_metadata],
             ids=[doc_id]
         )
+        logger.debug(f"[CHROMA] Added document with ID: {doc_id} for user: {self.user_id}")
         
     def delete_document(self, doc_id: str):
         """Delete a document from ChromaDB.

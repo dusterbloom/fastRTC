@@ -130,7 +130,7 @@ class SpokenUserIdentifier:
             text: Transcribed text from STT
             
         Returns:
-            User ID if identified, None otherwise
+            User ID in format "user_{name}" if identified, None otherwise
         """
         if not text:
             return None
@@ -141,17 +141,20 @@ class SpokenUserIdentifier:
         for pattern in self.activation_phrases:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                user_id = match.group(1).lower().strip()
+                username = match.group(1).lower().strip()
                 
                 # Auto-register new users or verify existing ones
-                if user_id not in self.users:
-                    self.register_user(user_id)
+                if username not in self.users:
+                    self.register_user(username)
                 
                 # Update login count
-                self.users[user_id]['login_count'] += 1
+                self.users[username]['login_count'] += 1
                 self._save_users()
                 
-                logger.info(f"👤 User identified: {user_id} via phrase: '{text}'")
+                # Return user_id in consistent format
+                user_id = f"user_{username}"
+                
+                logger.info(f"👤 User identified: {username} -> {user_id} via phrase: '{text}'")
                 
                 # Call callback if set
                 if self.on_user_identified:

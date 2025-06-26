@@ -674,7 +674,7 @@ class VoiceAssistant:
             "display_name": self.identified_name if self.user_identified else "Guest"
         }
     
-    def check_for_user_identification(self, user_text: str) -> bool:
+    async def check_for_user_identification(self, user_text: str) -> bool:
         """
         Check if user text contains identification and process it.
         
@@ -687,12 +687,14 @@ class VoiceAssistant:
         # First try the SpokenUserIdentifier
         identified_user_id = self.voice_print_manager.process_text(user_text)
         if identified_user_id:
-            # Store the identified name without changing user_id
-            if not self.user_identified or self.identified_name != identified_user_id:
+            # identified_user_id is now in format "user_alice" - switch to this user
+            if identified_user_id != self.user_id:
                 logger.info(f"👤 User identified via SpokenUserIdentifier: {identified_user_id}")
-                self.identified_name = identified_user_id
-                self.user_identified = True
-            return True
+                success = await self.identify_user(identified_user_id.replace("user_", ""))
+                return success
+            else:
+                logger.info(f"👤 User already identified as: {identified_user_id}")
+                return True
         
         # Fallback to original pattern matching
         import re
@@ -708,19 +710,9 @@ class VoiceAssistant:
             match = re.search(pattern, user_text.lower())
             if match:
                 name = match.group(1).strip()
-                # Note: This will need to be called from an async context
-                # For now, we'll create a task to handle it
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    task = loop.create_task(self.identify_user(name))
-                    # We can't await here since this method isn't async
-                    # The identification will happen in the background
-                    logger.info(f"👤 User identification task created for: {name}")
-                    return True
-                except Exception as e:
-                    logger.error(f"❌ Failed to create user identification task: {e}")
-                    return False
+                logger.info(f"👤 User identification pattern matched: {name}")
+                success = await self.identify_user(name)
+                return success
         
         return False
     
