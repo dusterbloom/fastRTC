@@ -159,7 +159,7 @@ class AgenticMemorySystem:
         self.retriever = ChromaRetriever(
             collection_name="memories",
             model_name=self.model_name,
-            persist_directory="backend/chroma_db",  # This will persist!
+            persist_directory=None,  # Use default absolute path
             user_id=self.user_id  # User-scoped collections
         )
         logger.debug("AgenticMemorySystem.__init__: ChromaRetriever created successfully")

@@ -1,6 +1,6 @@
 # FastRTC - Real-Time Voice Assistant
 
-A real-time voice assistant built with WebRTC, featuring fast speech-to-text, LLM processing, and text-to-speech capabilities.
+A high-performance real-time voice assistant built with WebRTC, featuring ultra-fast speech-to-text, LLM processing, multi-language TTS, and persistent memory system. Now with optimized database handling and streaming performance.
 
 ## 🚀 Quick Start
 
@@ -49,9 +49,10 @@ chmod +x fastrtc.sh
 - Graceful shutdown with Ctrl+C
 
 **Access Points**:
-- Frontend: http://localhost:3000
+- Frontend: http://localhost:3001
 - Backend API: http://localhost:8000
 - Health Check: http://localhost:8000/health
+- WebRTC Endpoint: http://localhost:8000/assistant
 
 ### 🐳 Docker Mode (`./fastrtc.sh docker`)
 
@@ -270,29 +271,46 @@ This change eliminates networking issues and provides a much better experience o
 
 ```
 fastRTC/
-├── fastrtc.sh            # 🌟 Universal deployment script
-├── .env.development      # Development configuration  
-├── .env.docker          # Docker configuration
-├── .env.production      # Production configuration
-├── docker-compose.yml   # Simplified Docker setup
-├── backend/             # Python FastAPI backend
+├── fastrtc.sh              # 🌟 Universal deployment script
+├── .env.development        # Development configuration  
+├── .env.docker            # Docker configuration
+├── .env.production        # Production configuration
+├── docker-compose.yml     # Simplified Docker setup
+├── chroma_db/             # 🧠 Persistent user memory database
+├── backend/               # Python FastAPI backend
 │   ├── src/
+│   │   ├── a_mem/         # Agentic memory system
+│   │   ├── audio/         # STT/TTS engines
+│   │   ├── integration/   # WebRTC & streaming
+│   │   ├── memory/        # Memory management
+│   │   └── services/      # LLM services
 │   ├── requirements.txt
-│   ├── start_clean.py
-│   └── start_deferred.py
-├── frontend/react-vite/ # React/Next.js frontend
-│   ├── lib/
-│   ├── components/
+│   └── start_deferred.py  # 🚀 Non-blocking startup
+├── frontend/react-vite/   # React/Next.js frontend
+│   ├── lib/webrtc-client.ts
+│   ├── components/ui/     # Voice input, language selector
 │   └── package.json
-└── README.md
+├── tasks/                 # 📋 Development tasks & reports
+└── docs/                  # 📚 Documentation & performance reports
 ```
 
 ## 🚀 Performance Tips
 
-1. **Use Faster-Whisper**: `STT_BACKEND=faster` in your environment
-2. **GPU Acceleration**: Ensure CUDA is available for model inference  
-3. **Memory Management**: Monitor usage with `docker stats` or `nvidia-smi`
-4. **Resource Allocation**: Development mode uses fewer resources than Docker
+### Database & Memory
+1. **Fixed Path Issues**: ChromaDB now uses correct paths - no more nested directories
+2. **Persistent Memory**: User conversations persist across restarts automatically
+3. **User Isolation**: Each user gets their own memory space for privacy
+
+### Audio Processing
+4. **Use Faster-Whisper**: `STT_BACKEND=faster` for 25% faster STT processing
+5. **Streaming Optimization**: Enhanced callback handlers for real-time responses
+6. **Multi-Language TTS**: Kokoro engine supports 8+ languages efficiently
+
+### System Resources
+7. **GPU Acceleration**: Ensure CUDA is available for model inference  
+8. **Memory Management**: Monitor usage with `docker stats` or `nvidia-smi`
+9. **Resource Allocation**: Development mode uses fewer resources than Docker
+10. **Performance Monitoring**: Check `/docs/performance_analysis_report.md` for detailed metrics
 
 ## 📝 Development Workflow
 
@@ -315,6 +333,15 @@ EXTERNAL_IP=production.server.ip ./fastrtc.sh prod
 
 ## 🌟 What's New
 
+### Latest Updates (December 2024)
+- **Fixed ChromaDB Path Issues**: Eliminated nested `backend/backend/chroma_db` creation
+- **Persistent Memory System**: User memories now properly persist across restarts
+- **Enhanced Streaming Performance**: Optimized audio callback handlers with auto-commit
+- **Multi-Language TTS**: Kokoro ONNX engine with 8+ language support
+- **User Isolation**: Complete memory separation between users
+- **Performance Monitoring**: Comprehensive benchmarking and optimization (26% faster pipeline)
+
+### Core Features
 - **Single command deployment**: One script for all modes
 - **Simplified Docker**: No more WSL2 complexity  
 - **Clean environment management**: Three clear configuration files

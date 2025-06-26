@@ -14,6 +14,7 @@ from nltk.tokenize import word_tokenize
 import os
 import json
 import ollama
+from pathlib import Path
 
 def simple_tokenize(text):
     return word_tokenize(text)
@@ -79,7 +80,7 @@ class ChromaRetriever:
         return f"{base_name}_user_{sanitized_user_id}"
     
     def __init__(self, collection_name: str = "memories", model_name: str = "nomic-embed-text:latest",
-                 persist_directory: str = "backend/chroma_db", user_id: Optional[str] = None):
+                 persist_directory: str = None, user_id: Optional[str] = None):
         """Initialize ChromaDB retriever with persistent storage.
         
         Args:
@@ -95,7 +96,21 @@ class ChromaRetriever:
         
         self.user_id = user_id
         self.base_collection_name = "memories" if collection_name.startswith("memories_user_") else collection_name
+        
+        # Set default persist directory to absolute path from project root
+        if persist_directory is None:
+            project_root = Path(__file__).parent.parent.parent  # Go up to project root
+            persist_directory = str(project_root / "chroma_db")
+        
         logger.debug(f"ChromaRetriever.__init__: Starting with persist_directory={persist_directory}")
+        
+        # Check if database already exists to avoid recreating memories
+        db_exists = os.path.exists(persist_directory) and os.path.exists(os.path.join(persist_directory, "chroma.sqlite3"))
+        if db_exists:
+            logger.info(f"🔍 Found existing ChromaDB at {persist_directory}")
+        else:
+            logger.info(f"📁 Creating new ChromaDB at {persist_directory}")
+        
         # Create persist directory if it doesn't exist
         os.makedirs(persist_directory, exist_ok=True)
         

@@ -129,7 +129,7 @@ class AMemMemoryManager(MemoryManager):
             self.amem_system.retriever = ChromaRetriever(
                 collection_name="memories",
                 model_name=self.amem_system.model_name,
-                persist_directory="backend/chroma_db",
+                persist_directory=None,  # Use default absolute path
                 user_id=new_user_id
             )
             
