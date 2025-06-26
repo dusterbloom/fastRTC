@@ -1,0 +1,11 @@
+# Local environment overrides for debugging
+# This file takes precedence over .env.development
+
+# Enhanced Debug Logging
+DEBUG_TIMING=true
+DEBUG_TTS=true
+DEBUG_STREAMING=true
+DEBUG_MEMORY=true
+
+# Set log level to DEBUG to see all timing logs
+LOG_LEVEL=DEBUG

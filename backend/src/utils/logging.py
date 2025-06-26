@@ -216,7 +216,8 @@ class VoiceAssistantFilter(logging.Filter):
         """Filter log records based on component."""
         if self.component:
             return record.name.startswith(f"backend.{self.component}")
-        return record.name.startswith("backend")
+        # Allow both backend.* and src.a_mem.* (memory modules) logs
+        return record.name.startswith("backend") or record.name.startswith("src.a_mem")
 
 
 def setup_logging(
@@ -318,6 +319,25 @@ def setup_logging(
                 existing_logger.setLevel(max(COMPONENT_LOG_LEVELS.get("backend.memory", logging.INFO), numeric_level))
         elif existing_logger.level < numeric_level:
             existing_logger.setLevel(numeric_level)
+    
+    # Also ensure that when new loggers are created, they respect the mapping
+    # This handles loggers created after setup_logging() is called
+    original_getLogger = logging.getLogger
+    
+    def patched_getLogger(name=None):
+        logger = original_getLogger(name)
+        if name and (name.startswith("src.a_mem") or name.startswith("backend.src.a_mem")):
+            current_root_level = logging.getLogger().level
+            if current_root_level == logging.DEBUG:
+                logger.setLevel(logging.DEBUG)
+            elif logger.level == logging.NOTSET or logger.level < current_root_level:
+                logger.setLevel(max(COMPONENT_LOG_LEVELS.get("backend.memory", logging.INFO), current_root_level))
+        return logger
+    
+    # Only patch once
+    if not hasattr(logging, '_fastrtc_patched'):
+        logging.getLogger = patched_getLogger
+        logging._fastrtc_patched = True
     
     # Log setup completion
     logger = logging.getLogger("backend.logging")

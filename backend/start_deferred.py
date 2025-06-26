@@ -370,10 +370,10 @@ if _frontend_dist.exists():
 if __name__ == "__main__":
     import uvicorn
     
-    # Parse command line arguments and update logging if needed
+    # Parse command line arguments for direct script usage
     args = parse_args()
     if args.log_level:
-        # Re-setup logging with command line level
+        # Re-setup logging with command line level (overrides environment)
         setup_logging(args.log_level)
         logger.info(f"Log level updated to {args.log_level} from command line")
     
@@ -381,11 +381,12 @@ if __name__ == "__main__":
     print(f"📡 Server will be available at http://{args.host}:{args.port}")
     print("🎤 WebRTC endpoint will be mounted at /assistant after initialization")
     print("💡 Check /health for component status")
+    print(f"📊 Log level: {os.getenv('LOG_LEVEL', 'INFO')}")
     
     uvicorn.run(
         app,
         host=args.host,
         port=args.port,
-        log_level="info",
+        log_level=log_level.lower(), # Use the parsed log level
         access_log=True
     )

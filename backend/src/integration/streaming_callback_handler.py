@@ -41,7 +41,6 @@ class StreamingPipeline:
         self.confidence_threshold = 0.6
         self.min_words_for_processing = 2
         
-    @time_streaming("Full Audio Stream Processing")
     async def process_audio_stream(self, audio_array: np.ndarray, sample_rate: int) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Process audio through full streaming pipeline.
@@ -53,6 +52,9 @@ class StreamingPipeline:
         Yields:
             Audio chunks from TTS streaming
         """
+        import time
+        start_time = time.time()
+        
         try:
             # Step 1: STT Processing
             if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
@@ -94,11 +96,15 @@ class StreamingPipeline:
             if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
                 logger.debug(f"✅ Step 3: Starting LLM→TTS pipeline for: '{user_text}'")
             else:
-                logger.info(f"🎤 Processing: '{user_text}'")
+                logger.info(f"🎤 USER: '{user_text}'")
             
             # Stream LLM→TTS pipeline
             async for audio_chunk in self._stream_llm_to_tts(user_text):
                 yield audio_chunk
+            
+            # Log total processing time
+            total_time = time.time() - start_time
+            logger.debug(f"⏱️ Full Audio Stream Processing: {total_time:.3f}s")
                 
         except Exception as e:
             logger.error(f"❌ Streaming pipeline error: {e}")
@@ -123,7 +129,6 @@ class StreamingPipeline:
             logger.error(f"❌ STT streaming error: {e}")
             return None
     
-    @time_streaming("LLM to TTS Pipeline")
     async def _stream_llm_to_tts(self, user_text: str) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Stream LLM response directly to TTS as tokens arrive.
@@ -134,6 +139,8 @@ class StreamingPipeline:
         Yields:
             Audio chunks from streaming TTS
         """
+        import time
+        start_time = time.time()
         sentence_buffer = ""
         token_count = 0
         sentence_count = 0
@@ -175,6 +182,10 @@ class StreamingPipeline:
                 
                 async for audio_chunk in self._stream_sentence_to_tts(remaining_text):
                     yield audio_chunk
+            
+            # Log total processing time
+            total_time = time.time() - start_time
+            logger.debug(f"⏱️ LLM to TTS Pipeline: {total_time:.3f}s")
                     
         except Exception as e:
             logger.error(f"❌ LLM→TTS streaming error: {e}")
@@ -287,7 +298,6 @@ class StreamingPipeline:
         
         return False
     
-    @time_streaming("Sentence to TTS")
     async def _stream_sentence_to_tts(self, sentence: str) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Stream a sentence through TTS engine.
@@ -298,6 +308,9 @@ class StreamingPipeline:
         Yields:
             Audio chunks from TTS
         """
+        import time
+        start_time = time.time()
+        
         try:
             # Get current language and voice
             current_language = self.voice_assistant.current_language
@@ -317,6 +330,10 @@ class StreamingPipeline:
                         mini_chunk = audio_chunk[i:i+chunk_size]
                         if mini_chunk.size > 0:
                             yield (sample_rate, mini_chunk), AdditionalOutputs()
+            
+            # Log total processing time
+            total_time = time.time() - start_time
+            logger.debug(f"⏱️ Sentence to TTS: {total_time:.3f}s")
                             
         except Exception as e:
             logger.error(f"❌ TTS sentence streaming error: {e}")

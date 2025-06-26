@@ -259,7 +259,7 @@ get_external_ip() {
 health_check() {
     local service="$1"
     local url="$2"
-    local max_attempts=30
+    local max_attempts=999999999 # Effectively infinite attempts
     local attempt=0
     
     log_step "Waiting for $service to be ready..."

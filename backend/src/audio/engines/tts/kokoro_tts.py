@@ -114,7 +114,8 @@ class KokoroTTSEngine(BaseTTSEngine):
             raise TTSError("Kokoro TTS model not initialized")
         
         try:
-            # Debug: Log the text being synthesized
+            # Log the text being synthesized
+            logger.info(f"🤖 ASSISTANT: '{text}'")
             if os.getenv("DEBUG_TTS", "false").lower() == "true":
                 logger.debug(f"🔤 TTS Text Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
             
@@ -257,7 +258,8 @@ class KokoroTTSEngine(BaseTTSEngine):
             raise TTSError("Kokoro TTS model not initialized")
         
         try:
-            # Debug: Log the text being streamed
+            # Log the text being streamed
+            logger.info(f"🤖 ASSISTANT: '{text}'")
             if os.getenv("DEBUG_TTS", "false").lower() == "true":
                 logger.debug(f"🌊 TTS Stream Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
             
