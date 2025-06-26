@@ -14,3 +14,11 @@ certs/
 .env.docker.generated
 backend/.env.docker.generated
 frontend/react-vite/.env.docker.generated
+
+.env
+# Local development environment files
+.env.local
+# Local development environment files for backend
+backend/.env.local
+# Local development environment files for frontend
+frontend/react-vite/.env.local
