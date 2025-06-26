@@ -7,7 +7,10 @@ Ollama and LM Studio backends with context building and error handling.
 import asyncio
 import aiohttp
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import AsyncGenerator
 
 from ..core.interfaces import LLMService as LLMServiceInterface
 from ..core.exceptions import LLMError
@@ -415,6 +418,293 @@ class LLMService(LLMServiceInterface):
             'temperature': self.temperature
         }
     
+    async def stream_response(self, user_text: str, context: str = "") -> "AsyncGenerator[str, None]":
+        """
+        Stream LLM response token by token for real-time conversation.
+        
+        Args:
+            user_text: User's input text
+            context: Conversation context from memory
+            
+        Yields:
+            str: Individual tokens or token chunks from LLM
+            
+        Raises:
+            LLMError: If streaming request fails
+        """
+        self._stats['requests'] += 1
+        
+        # Check cache first (for complete responses only)
+        if self.response_cache:
+            cached_response = self.response_cache.get(user_text)
+            if cached_response:
+                self._stats['cache_hits'] += 1
+                logger.debug(f"Cache hit for streaming request: {user_text[:50]}...")
+                # Yield cached response word by word for consistent streaming UX
+                words = cached_response.split()
+                for i, word in enumerate(words):
+                    if i == 0:
+                        yield word
+                    else:
+                        yield " " + word
+                return
+        
+        # Handle special cases that don't need streaming
+        recall_phrases = [
+            'what do you remember', 'what do you know about me', 
+            'tell me about myself', 'what is my name', 'who am i'
+        ]
+        if any(phrase in user_text.lower() for phrase in recall_phrases):
+            if self.memory_manager:
+                memory_search_result = await self.memory_manager.search_memories(user_text)
+                if self.response_cache:
+                    self.response_cache.put(user_text, memory_search_result)
+                self._stats['successes'] += 1
+                
+                # Stream memory result
+                words = memory_search_result.split()
+                for i, word in enumerate(words):
+                    if i == 0:
+                        yield word
+                    else:
+                        yield " " + word
+                return
+        
+        # Handle memory deletion requests
+        delete_phrases = ["delete all your memory", "reset", "forget everything"]
+        if any(phrase in user_text.lower() for phrase in delete_phrases):
+            if self.memory_manager:
+                result = await self.memory_manager.clear_memory()
+                response = ("I've erased all my memories and reset my knowledge network." 
+                          if result else "Sorry, I couldn't erase my memories due to an internal error.")
+                if self.response_cache:
+                    self.response_cache.put(user_text, response)
+                self._stats['successes'] += 1
+                
+                # Stream deletion response
+                words = response.split()
+                for i, word in enumerate(words):
+                    if i == 0:
+                        yield word
+                    else:
+                        yield " " + word
+                return
+        
+        # Handle name extraction and acknowledgment
+        if self.memory_manager:
+            potential_name = self.memory_manager.extract_user_name(user_text)
+            if potential_name:
+                self.memory_manager.update_local_cache(user_text, "personal_info", is_current_turn_extraction=True)
+                
+                # Check if this is a simple name introduction
+                name_pattern = rf"(my name is|i'?m|call me|i am)\s+{re.escape(potential_name)}\s*\.?"
+                if re.fullmatch(name_pattern, user_text.lower().strip(), re.IGNORECASE):
+                    ack = f"Got it, {potential_name}! I'll remember that and my memory system will create connections with this information."
+                    await self.memory_manager.add_memory(user_text, ack)
+                    if self.response_cache:
+                        self.response_cache.put(user_text, ack)
+                    self._stats['successes'] += 1
+                    
+                    # Stream acknowledgment
+                    words = ack.split()
+                    for i, word in enumerate(words):
+                        if i == 0:
+                            yield word
+                        else:
+                            yield " " + word
+                    return
+        
+        # Stream LLM response
+        full_response = ""
+        try:
+            async for token in self._stream_llm_response(user_text, context):
+                full_response += token
+                yield token
+            
+            # Store complete response in memory and cache
+            if self.memory_manager and full_response.strip():
+                await self.memory_manager.add_memory(user_text, full_response)
+            
+            if self.response_cache and full_response.strip():
+                self.response_cache.put(user_text, full_response)
+            
+            self._stats['successes'] += 1
+            
+        except Exception as e:
+            self._stats['failures'] += 1
+            logger.error(f"LLM streaming request failed: {e}")
+            raise LLMError(f"LLM streaming request failed: {e}")
+    
+    async def _stream_llm_response(self, user_text: str, context: str) -> "AsyncGenerator[str, None]":
+        """
+        Stream response from configured LLM backend.
+        
+        Args:
+            user_text: User's input text
+            context: Conversation context
+            
+        Yields:
+            str: Token chunks from LLM
+            
+        Raises:
+            LLMError: If streaming request fails
+        """
+        if not self.http_session:
+            raise LLMError("HTTP session not available for LLM streaming")
+        
+        system_prompt = self._get_llm_context_prompt(context)
+        
+        # Add memory search if needed
+        if "remember" in user_text.lower() or "talked about" in user_text.lower():
+            if self.memory_manager:
+                detailed_memories = await self.memory_manager.search_memories(user_text)
+                if detailed_memories and "don't have specific memories" not in detailed_memories:
+                    system_prompt += f"\n\nBased on your query, here's some potentially relevant information from my memory:\n{detailed_memories}"
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text}
+        ]
+        
+        try:
+            if self.use_ollama:
+                async for token in self._stream_ollama(messages):
+                    yield token
+            else:
+                async for token in self._stream_lm_studio(messages):
+                    yield token
+                    
+        except aiohttp.ClientConnectorError as e:
+            self._stats['connection_errors'] += 1
+            url_used = self.ollama_url if self.use_ollama else self.lm_studio_url
+            error_msg = f"Unable to connect to LLM server at {url_used}. Is the server running?"
+            logger.error(f"❌ LLM Connection Error: {e}. {error_msg}")
+            raise LLMError(error_msg)
+            
+        except asyncio.TimeoutError:
+            self._stats['timeouts'] += 1
+            url_used = self.ollama_url if self.use_ollama else self.lm_studio_url
+            error_msg = f"LLM streaming request timed out after {self.timeout}s to {url_used}"
+            logger.error(f"❌ {error_msg}")
+            raise LLMError("Request is taking longer than usual. Please try again.")
+            
+        except Exception as e:
+            logger.error(f"❌ Unexpected LLM streaming error: {e}")
+            raise LLMError(f"Unexpected error during LLM streaming: {e}")
+    
+    async def _stream_ollama(self, messages: list) -> "AsyncGenerator[str, None]":
+        """
+        Stream response from Ollama API.
+        
+        Args:
+            messages: List of message dictionaries
+            
+        Yields:
+            str: Token chunks from Ollama
+            
+        Raises:
+            LLMError: If Ollama streaming fails
+        """
+        payload = {
+            "model": self.ollama_model,
+            "messages": messages,
+            "stream": True,  # Enable streaming
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.max_tokens
+            }
+        }
+        
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        async with self.http_session.post(
+            f"{self.ollama_url}/api/chat", 
+            json=payload, 
+            timeout=timeout
+        ) as response:
+            if response.status == 200:
+                async for line in response.content:
+                    if line:
+                        try:
+                            import json
+                            chunk_data = json.loads(line.decode('utf-8').strip())
+                            
+                            if chunk_data.get("done", False):
+                                break
+                            
+                            content = chunk_data.get("message", {}).get("content", "")
+                            if content:
+                                yield content
+                                
+                        except json.JSONDecodeError:
+                            continue
+                        except Exception as e:
+                            logger.warning(f"Error parsing Ollama stream chunk: {e}")
+                            continue
+            else:
+                error_body = await response.text()
+                logger.error(f"⚠️ Ollama streaming failed: Status {response.status}, Body: {error_body[:200]}")
+                raise LLMError(f"Ollama streaming failed with status {response.status}")
+    
+    async def _stream_lm_studio(self, messages: list) -> "AsyncGenerator[str, None]":
+        """
+        Stream response from LM Studio API.
+        
+        Args:
+            messages: List of message dictionaries
+            
+        Yields:
+            str: Token chunks from LM Studio
+            
+        Raises:
+            LLMError: If LM Studio streaming fails
+        """
+        payload = {
+            "model": self.lm_studio_model,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "stream": True  # Enable streaming
+        }
+        
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        async with self.http_session.post(
+            f"{self.lm_studio_url}/chat/completions", 
+            json=payload, 
+            timeout=timeout
+        ) as response:
+            if response.status == 200:
+                async for line in response.content:
+                    if line:
+                        try:
+                            import json
+                            line_text = line.decode('utf-8').strip()
+                            
+                            # Skip SSE prefixes and empty lines
+                            if line_text.startswith('data: '):
+                                line_text = line_text[6:]
+                            
+                            if not line_text or line_text == '[DONE]':
+                                continue
+                            
+                            chunk_data = json.loads(line_text)
+                            choices = chunk_data.get("choices", [])
+                            
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield content
+                                    
+                        except json.JSONDecodeError:
+                            continue
+                        except Exception as e:
+                            logger.warning(f"Error parsing LM Studio stream chunk: {e}")
+                            continue
+            else:
+                error_body = await response.text()
+                logger.error(f"⚠️ LM Studio streaming failed: Status {response.status}, Body: {error_body[:200]}")
+                raise LLMError(f"LM Studio streaming failed with status {response.status}")
+
     async def shutdown(self):
         """Shutdown the LLM service gracefully."""
         logger.info("LLM service shutdown complete")

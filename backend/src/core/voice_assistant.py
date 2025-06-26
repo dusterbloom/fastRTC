@@ -12,8 +12,11 @@ import numpy as np
 import aiohttp
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from .interfaces import AudioData
+
+if TYPE_CHECKING:
+    from typing import AsyncGenerator
 
 
 from ..audio import (
@@ -78,7 +81,7 @@ class VoiceAssistant:
 
         # Store configuration
         logger.debug("VoiceAssistant.__init__: Storing config")
-        self.config = config
+        self.config = config or load_config()
 
         # Session and user tracking (set early for memory manager)
         logger.debug("VoiceAssistant.__init__: Setting user ID and session ID")
@@ -366,6 +369,57 @@ class VoiceAssistant:
             Generated response text
         """
         return await self.process_audio_turn(user_text)
+    
+    async def stream_llm_response_smart(self, user_text: str) -> "AsyncGenerator[str, None]":
+        """
+        Stream intelligent LLM response with memory integration.
+        Optimized for real-time conversation flow.
+        
+        Args:
+            user_text: User input text
+            
+        Yields:
+            str: Token chunks from LLM response
+        """
+        # Log user input prominently
+        conversation_logger.log_user_input(user_text)
+        
+        # Check cache first
+        cached_response = self.get_cached_response(user_text)
+        if cached_response:
+            logger.info("📋 Using cached response for streaming")
+            conversation_logger.log_assistant_response(cached_response)
+            
+            # Stream cached response word by word for consistent UX
+            words = cached_response.split()
+            for i, word in enumerate(words):
+                if i == 0:
+                    yield word
+                else:
+                    yield " " + word
+            return
+        
+        # Build context from A-MEM long-term memory and current session history
+        amem_context = ""
+        if self.memory_manager:
+            amem_context = self.memory_manager.get_user_context()
+            logger.debug(f"A-MEM Context for streaming LLM: {amem_context}")
+        
+        final_context_for_llm_service = amem_context
+        
+        # Stream LLM response
+        full_response = ""
+        async for token in self.llm_service.stream_response(user_text, final_context_for_llm_service):
+            full_response += token
+            yield token
+        
+        # Update memory and cache with complete response
+        if full_response.strip():
+            await self.memory_manager.add_to_memory_smart(user_text, full_response)
+            self.cache_response(user_text, full_response)
+            
+            # Log complete assistant response
+            conversation_logger.log_assistant_response(full_response)
     
     def detect_language_from_text(self, text: str) -> str:
         """

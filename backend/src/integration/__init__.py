@@ -6,13 +6,21 @@ and the FastRTC streaming infrastructure.
 """
 
 from .fastrtc_bridge import FastRTCBridge
-from .callback_handler import StreamCallbackHandler
+from .streaming_callback_handler import StreamingCallbackHandler
+
+# Keep old handler for fallback
+from .callback_handler import StreamCallbackHandler as LegacyStreamCallbackHandler
+
+# Use streaming handler as primary
+StreamCallbackHandler = StreamingCallbackHandler
 
 # Alias for backward compatibility
-CallbackHandler = StreamCallbackHandler
+CallbackHandler = StreamingCallbackHandler
 
 __all__ = [
     'FastRTCBridge',
+    'StreamingCallbackHandler', 
     'StreamCallbackHandler',
+    'LegacyStreamCallbackHandler',
     'CallbackHandler'
 ]

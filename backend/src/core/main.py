@@ -79,12 +79,11 @@ class VoiceAssistantApplication:
             event_loop = self.async_env_manager.get_event_loop()
             
             # Initialize stream callback handler
-            logger.info("🎤 Creating stream callback handler...")
+            logger.info("🎤 Creating streaming callback handler...")
             self.callback_handler = StreamCallbackHandler(
                 voice_assistant=self.voice_assistant,
                 stt_engine=self.voice_assistant.stt_engine,
                 tts_engine=self.voice_assistant.tts_engine,
-                language_detector=self.voice_assistant.language_detector,
                 voice_mapper=self.voice_assistant.voice_mapper,
                 event_loop=event_loop
             )

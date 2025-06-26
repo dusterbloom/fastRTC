@@ -4,8 +4,11 @@ import time
 import logging
 import asyncio
 import numpy as np
-from typing import List, Dict, Any, Optional, Generator, Tuple
+from typing import List, Dict, Any, Optional, Generator, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from typing import AsyncGenerator
 
 from .base import BaseTTSEngine
 from ....core.interfaces import AudioData
@@ -307,6 +310,104 @@ class KokoroTTSEngine(BaseTTSEngine):
         
         return info
     
+    async def stream_synthesis_async(self, text: str, voice: str, language: str) -> "AsyncGenerator[Tuple[int, np.ndarray], None]":
+        """
+        Async streaming synthesis for real-time conversation flow.
+        
+        Args:
+            text: Text to synthesize
+            voice: Voice identifier
+            language: Language code
+            
+        Yields:
+            Tuple[int, np.ndarray]: (sample_rate, audio_chunk)
+        """
+        if not self.tts_model:
+            raise TTSError("Kokoro TTS model not initialized")
+        
+        try:
+            # Prepare TTS options
+            options_params = {"speed": 1.05}
+            kokoro_tts_lang = KOKORO_TTS_LANG_MAP.get(language, 'en-us')
+            options_params["lang"] = kokoro_tts_lang
+            
+            if voice:
+                options_params["voice"] = voice
+            
+            tts_options = KokoroTTSOptions(**options_params)
+            logger.debug(f"🔊 Async streaming synthesis: '{text[:50]}...' with voice '{voice}', lang '{kokoro_tts_lang}'")
+            
+            # Run synthesis in executor to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            
+            # Create a generator function that can be run in executor
+            def _sync_generator():
+                chunk_count = 0
+                total_samples = 0
+                chunks = []
+                
+                for tts_output_item in self.tts_model.stream_tts_sync(text, tts_options):
+                    if isinstance(tts_output_item, tuple) and len(tts_output_item) == 2:
+                        sample_rate, audio_array = tts_output_item
+                        if isinstance(audio_array, np.ndarray) and audio_array.size > 0:
+                            chunk_count += 1
+                            total_samples += audio_array.size
+                            
+                            # Split into smaller chunks for responsiveness
+                            chunk_size = min(512, audio_array.size)  # Smaller chunks for streaming
+                            for i in range(0, audio_array.size, chunk_size):
+                                mini_chunk = audio_array[i:i+chunk_size]
+                                if mini_chunk.size > 0:
+                                    chunks.append((sample_rate, mini_chunk.astype(np.float32)))
+                                    
+                    elif isinstance(tts_output_item, np.ndarray) and tts_output_item.size > 0:
+                        chunk_count += 1
+                        total_samples += tts_output_item.size
+                        sample_rate = 24000  # Kokoro default
+                        
+                        chunk_size = min(512, tts_output_item.size)
+                        for i in range(0, tts_output_item.size, chunk_size):
+                            mini_chunk = tts_output_item[i:i+chunk_size]
+                            if mini_chunk.size > 0:
+                                chunks.append((sample_rate, mini_chunk.astype(np.float32)))
+                
+                logger.debug(f"✅ Async synthesis completed. Chunks: {chunk_count}, Total mini-chunks: {len(chunks)}, Samples: {total_samples}")
+                return chunks
+            
+            # Run the synthesis in executor
+            chunks = await loop.run_in_executor(None, _sync_generator)
+            
+            # Yield chunks asynchronously
+            for sample_rate, audio_chunk in chunks:
+                yield (sample_rate, audio_chunk)
+                # Small yield to allow other coroutines to run
+                await asyncio.sleep(0)
+                
+        except Exception as e:
+            logger.error(f"❌ Async streaming synthesis failed: {e}")
+            raise TTSError(f"Async streaming synthesis failed: {e}") from e
+    
+    async def synthesize_sentence_async(self, sentence: str, voice: str, language: str) -> "AsyncGenerator[Tuple[int, np.ndarray], None]":
+        """
+        Synthesize a single sentence asynchronously for sentence-level streaming.
+        Optimized for real-time conversation where sentences arrive from LLM streaming.
+        
+        Args:
+            sentence: Complete sentence to synthesize
+            voice: Voice identifier
+            language: Language code
+            
+        Yields:
+            Tuple[int, np.ndarray]: (sample_rate, audio_chunk)
+        """
+        if not sentence.strip():
+            return
+            
+        logger.debug(f"🔊 Synthesizing sentence: '{sentence}' (voice: {voice}, lang: {language})")
+        
+        async for sample_rate, audio_chunk in self.stream_synthesis_async(sentence, voice, language):
+            yield (sample_rate, audio_chunk)
+
     def is_available(self) -> bool:
         """Check if the TTS engine is available and ready.
         

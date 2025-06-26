@@ -20,17 +20,18 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 # Make local packages importable
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 from src.core.voice_assistant import VoiceAssistant
 from src.integration.fastrtc_bridge import FastRTCBridge
-from src.integration.callback_handler import StreamCallbackHandler
+from src.integration.streaming_callback_handler import StreamingCallbackHandler as StreamCallbackHandler
 from src.utils.async_utils import AsyncEnvironmentManager
 from src.config.settings import load_config
 from src.utils.logging import get_logger, setup_logging
@@ -57,6 +58,10 @@ class GlobalComponents:
         self.initialization_error: Optional[str] = None
 
 components = GlobalComponents()
+
+# Pydantic models for API requests
+class LanguageRequest(BaseModel):
+    language: str
 
 async def initialize_voice_assistant_deferred(app: FastAPI):
     """
@@ -236,6 +241,115 @@ async def debug_reinitialize(background_tasks: BackgroundTasks):
     # Start new initialization
     background_tasks.add_task(initialize_voice_assistant_deferred, app)
     return {"status": "started", "message": "Re-initialization started in background"}
+
+@app.post("/api/set-language")
+async def set_language(request: LanguageRequest):
+    """Set the current language for voice assistant responses.
+    
+    This endpoint allows the frontend to change the language used for
+    TTS synthesis, immediately switching to the appropriate Kokoro voice.
+    """
+    if not components.is_initialized:
+        raise HTTPException(
+            status_code=503,
+            detail="Voice assistant not initialized yet. Please wait."
+        )
+    
+    language_code = request.language
+    
+    # Validate language code
+    from src.config.language_config import KOKORO_VOICE_MAP, LANGUAGE_NAMES
+    
+    if language_code not in KOKORO_VOICE_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported language code: {language_code}. Supported: {list(KOKORO_VOICE_MAP.keys())}"
+        )
+    
+    try:
+        # Update the voice assistant's current language
+        components.voice_assistant.current_language = language_code
+        
+        # Get available voices for this language
+        available_voices = components.voice_assistant.get_voices_for_language(language_code)
+        language_name = LANGUAGE_NAMES.get(language_code, f"Language {language_code}")
+        
+        logger.info(f"🌍 Language switched to: {language_name} ({language_code}) with {len(available_voices)} voices")
+        
+        return {
+            "status": "success",
+            "language": {
+                "code": language_code,
+                "name": language_name,
+                "available_voices": available_voices
+            },
+            "message": f"Language switched to {language_name}"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to set language: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to set language: {str(e)}"
+        )
+
+@app.get("/api/current-language")
+async def get_current_language():
+    """Get the current language setting."""
+    if not components.is_initialized:
+        raise HTTPException(
+            status_code=503,
+            detail="Voice assistant not initialized yet. Please wait."
+        )
+    
+    try:
+        from src.config.language_config import LANGUAGE_NAMES
+        
+        current_lang = components.voice_assistant.current_language
+        available_voices = components.voice_assistant.get_voices_for_language(current_lang)
+        language_name = LANGUAGE_NAMES.get(current_lang, f"Language {current_lang}")
+        
+        return {
+            "language": {
+                "code": current_lang,
+                "name": language_name,
+                "available_voices": available_voices
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get current language: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get current language: {str(e)}"
+        )
+
+@app.get("/api/supported-languages")
+async def get_supported_languages():
+    """Get all supported languages and their available voices."""
+    try:
+        from src.config.language_config import KOKORO_VOICE_MAP, LANGUAGE_NAMES
+        
+        languages = []
+        for code, voices in KOKORO_VOICE_MAP.items():
+            languages.append({
+                "code": code,
+                "name": LANGUAGE_NAMES.get(code, f"Language {code}"),
+                "available_voices": voices,
+                "voice_count": len(voices)
+            })
+        
+        return {
+            "supported_languages": languages,
+            "total_languages": len(languages)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get supported languages: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get supported languages: {str(e)}"
+        )
 
 # Optional: serve frontend
 _frontend_dist = Path(__file__).parent / "frontend" / "dist"
