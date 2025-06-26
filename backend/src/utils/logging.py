@@ -298,14 +298,25 @@ def setup_logging(
         if isinstance(level, str):
             level = getattr(logging, level.upper(), logging.INFO)
         
-        # Ensure component level is not lower than global level
-        effective_level = max(level, numeric_level)
+        # When global level is DEBUG, allow all components to use DEBUG
+        # Otherwise, ensure component level is not lower than global level
+        if numeric_level == logging.DEBUG:
+            effective_level = logging.DEBUG
+        else:
+            effective_level = max(level, numeric_level)
         logging.getLogger(component).setLevel(effective_level)
     
-    # Enforce global level on all existing loggers
+    # Enforce global level on all existing loggers and handle memory module mapping
     for name in logging.Logger.manager.loggerDict:
         existing_logger = logging.getLogger(name)
-        if existing_logger.level < numeric_level:
+        
+        # Map memory module loggers to backend.memory level
+        if name.startswith("src.a_mem") or name.startswith("backend.src.a_mem"):
+            if numeric_level == logging.DEBUG:
+                existing_logger.setLevel(logging.DEBUG)
+            else:
+                existing_logger.setLevel(max(COMPONENT_LOG_LEVELS.get("backend.memory", logging.INFO), numeric_level))
+        elif existing_logger.level < numeric_level:
             existing_logger.setLevel(numeric_level)
     
     # Log setup completion

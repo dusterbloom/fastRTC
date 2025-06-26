@@ -16,6 +16,7 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 import sys
 import asyncio
 import threading
+import argparse
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -36,7 +37,16 @@ from src.utils.async_utils import AsyncEnvironmentManager
 from src.config.settings import load_config
 from src.utils.logging import get_logger, setup_logging
 
-# Initial setup - read log level from environment
+# Parse command line arguments for log level
+def parse_args():
+    parser = argparse.ArgumentParser(description='FastRTC Voice Assistant Server')
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], 
+                       help='Set logging level (overrides LOG_LEVEL environment variable)')
+    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
+    parser.add_argument('--port', type=int, default=8000, help='Port to bind to')
+    return parser.parse_args()
+
+# Initial setup - read log level from environment (command line args parsed in main)
 log_level = os.getenv("LOG_LEVEL", "INFO")
 setup_logging(log_level)
 logger = get_logger(__name__)
@@ -360,15 +370,22 @@ if _frontend_dist.exists():
 if __name__ == "__main__":
     import uvicorn
     
+    # Parse command line arguments and update logging if needed
+    args = parse_args()
+    if args.log_level:
+        # Re-setup logging with command line level
+        setup_logging(args.log_level)
+        logger.info(f"Log level updated to {args.log_level} from command line")
+    
     print("🚀 Starting FastRTC Voice Assistant Server...")
-    print("📡 Server will be available at http://localhost:8000")
+    print(f"📡 Server will be available at http://{args.host}:{args.port}")
     print("🎤 WebRTC endpoint will be mounted at /assistant after initialization")
     print("💡 Check /health for component status")
     
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
+        host=args.host,
+        port=args.port,
         log_level="info",
         access_log=True
     )

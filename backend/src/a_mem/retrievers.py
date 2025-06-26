@@ -2,7 +2,6 @@ from typing import List, Dict, Any, Optional, Union
 import time
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 from rank_bm25 import BM25Okapi
 import nltk
 import numpy as np
@@ -99,7 +98,7 @@ class ChromaRetriever:
         
         # Set default persist directory to absolute path from project root
         if persist_directory is None:
-            project_root = Path(__file__).parent.parent.parent  # Go up to project root
+            project_root = Path(__file__).parent.parent.parent.parent  # Go up to project root
             persist_directory = str(project_root / "backend" / "chroma_db")
         
         logger.debug(f"ChromaRetriever.__init__: Starting with persist_directory={persist_directory}")
