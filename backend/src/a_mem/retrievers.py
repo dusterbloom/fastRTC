@@ -100,7 +100,7 @@ class ChromaRetriever:
         # Set default persist directory to absolute path from project root
         if persist_directory is None:
             project_root = Path(__file__).parent.parent.parent  # Go up to project root
-            persist_directory = str(project_root / "chroma_db")
+            persist_directory = str(project_root / "backend" / "chroma_db")
         
         logger.debug(f"ChromaRetriever.__init__: Starting with persist_directory={persist_directory}")
         

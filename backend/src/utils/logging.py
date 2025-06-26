@@ -9,8 +9,10 @@ import logging
 import os
 import json
 import sys
+import time
+import functools
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable, Union
 from datetime import datetime
 
 
@@ -466,3 +468,237 @@ def get_conversation_logger(name: str) -> ConversationLogger:
     base_logger = get_logger(name)
     show_conversation = os.getenv("SHOW_CONVERSATION", "true").lower() == "true"
     return ConversationLogger(base_logger, show_conversation)
+
+
+# Enhanced Performance Monitoring Decorators
+def time_it(logger: Optional[logging.Logger] = None, 
+           operation: Optional[str] = None,
+           log_level: int = logging.INFO,
+           enabled_env_var: Optional[str] = None) -> Callable:
+    """
+    General timing decorator for any function.
+    
+    Args:
+        logger: Logger instance to use (defaults to function's module logger)
+        operation: Operation name for logging (defaults to function name)
+        log_level: Log level for timing info (default: INFO)
+        enabled_env_var: Environment variable to check if timing is enabled
+        
+    Returns:
+        Decorator function
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Check if timing is enabled
+            if enabled_env_var and not os.getenv(enabled_env_var, "false").lower() == "true":
+                return func(*args, **kwargs)
+            
+            # Get logger
+            func_logger = logger or get_logger(func.__module__)
+            op_name = operation or func.__name__
+            
+            # Time the function
+            start_time = time.time()
+            try:
+                result = func(*args, **kwargs)
+                duration = time.time() - start_time
+                func_logger.log(log_level, f"⏱️ {op_name}: {duration:.3f}s")
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                func_logger.log(log_level, f"⏱️ {op_name}: {duration:.3f}s (failed: {e})")
+                raise
+        
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            # Check if timing is enabled
+            if enabled_env_var and not os.getenv(enabled_env_var, "false").lower() == "true":
+                return await func(*args, **kwargs)
+            
+            # Get logger
+            func_logger = logger or get_logger(func.__module__)
+            op_name = operation or func.__name__
+            
+            # Time the async function
+            start_time = time.time()
+            try:
+                result = await func(*args, **kwargs)
+                duration = time.time() - start_time
+                func_logger.log(log_level, f"⏱️ {op_name}: {duration:.3f}s")
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                func_logger.log(log_level, f"⏱️ {op_name}: {duration:.3f}s (failed: {e})")
+                raise
+        
+        # Return appropriate wrapper based on function type
+        import asyncio
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return wrapper
+    
+    return decorator
+
+
+def time_tts(operation: Optional[str] = None, log_level: int = logging.DEBUG) -> Callable:
+    """
+    TTS-specific timing decorator.
+    
+    Args:
+        operation: Operation name (defaults to function name)
+        log_level: Log level for timing info
+        
+    Returns:
+        Decorator function
+    """
+    return time_it(
+        logger=get_logger("backend.audio.tts"),
+        operation=operation,
+        log_level=log_level,
+        enabled_env_var="DEBUG_TTS"
+    )
+
+
+def time_streaming(operation: Optional[str] = None, log_level: int = logging.DEBUG) -> Callable:
+    """
+    Streaming pipeline timing decorator.
+    
+    Args:
+        operation: Operation name (defaults to function name)
+        log_level: Log level for timing info
+        
+    Returns:
+        Decorator function
+    """
+    return time_it(
+        logger=get_logger("backend.integration.streaming"),
+        operation=operation,
+        log_level=log_level,
+        enabled_env_var="DEBUG_STREAMING"
+    )
+
+
+def time_memory(operation: Optional[str] = None, log_level: int = logging.DEBUG) -> Callable:
+    """
+    Memory system timing decorator.
+    
+    Args:
+        operation: Operation name (defaults to function name)
+        log_level: Log level for timing info
+        
+    Returns:
+        Decorator function
+    """
+    return time_it(
+        logger=get_logger("backend.memory"),
+        operation=operation,
+        log_level=log_level,
+        enabled_env_var="DEBUG_MEMORY"
+    )
+
+
+def time_general(operation: Optional[str] = None, log_level: int = logging.DEBUG) -> Callable:
+    """
+    General timing decorator enabled by DEBUG_TIMING.
+    
+    Args:
+        operation: Operation name (defaults to function name)
+        log_level: Log level for timing info
+        
+    Returns:
+        Decorator function
+    """
+    return time_it(
+        operation=operation,
+        log_level=log_level,
+        enabled_env_var="DEBUG_TIMING"
+    )
+
+
+class PerformanceTimer:
+    """Context manager for timing code blocks with detailed logging."""
+    
+    def __init__(self, 
+                 logger: logging.Logger,
+                 operation: str,
+                 log_level: int = logging.INFO,
+                 enabled_env_var: Optional[str] = None):
+        """
+        Initialize performance timer.
+        
+        Args:
+            logger: Logger instance
+            operation: Operation name
+            log_level: Log level for timing info
+            enabled_env_var: Environment variable to check if enabled
+        """
+        self.logger = logger
+        self.operation = operation
+        self.log_level = log_level
+        self.enabled = (not enabled_env_var or 
+                       os.getenv(enabled_env_var, "false").lower() == "true")
+        self.start_time = None
+        
+    def __enter__(self):
+        """Start timing."""
+        if self.enabled:
+            self.start_time = time.time()
+            self.logger.log(self.log_level, f"🚀 Starting {self.operation}")
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """End timing and log results."""
+        if self.enabled and self.start_time:
+            duration = time.time() - self.start_time
+            if exc_type:
+                self.logger.log(self.log_level, f"❌ {self.operation}: {duration:.3f}s (failed: {exc_val})")
+            else:
+                self.logger.log(self.log_level, f"✅ {self.operation}: {duration:.3f}s")
+    
+    def checkpoint(self, checkpoint_name: str):
+        """Log an intermediate checkpoint."""
+        if self.enabled and self.start_time:
+            duration = time.time() - self.start_time
+            self.logger.log(self.log_level, f"🔄 {self.operation} - {checkpoint_name}: {duration:.3f}s")
+
+
+def create_tts_timer(operation: str) -> PerformanceTimer:
+    """Create a TTS performance timer."""
+    return PerformanceTimer(
+        get_logger("backend.audio.tts"),
+        operation,
+        logging.DEBUG,
+        "DEBUG_TTS"
+    )
+
+
+def create_streaming_timer(operation: str) -> PerformanceTimer:
+    """Create a streaming pipeline performance timer."""
+    return PerformanceTimer(
+        get_logger("backend.integration.streaming"),
+        operation,
+        logging.DEBUG,
+        "DEBUG_STREAMING"
+    )
+
+
+def create_memory_timer(operation: str) -> PerformanceTimer:
+    """Create a memory system performance timer."""
+    return PerformanceTimer(
+        get_logger("backend.memory"),
+        operation,
+        logging.DEBUG,
+        "DEBUG_MEMORY"
+    )
+
+
+def create_general_timer(operation: str) -> PerformanceTimer:
+    """Create a general performance timer."""
+    return PerformanceTimer(
+        get_logger("backend.core"),
+        operation,
+        logging.DEBUG,
+        "DEBUG_TIMING"
+    )

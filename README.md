@@ -203,7 +203,145 @@ STT_BACKEND=huggingface ./fastrtc.sh dev
                          localhost networking
 ```
 
-## 🔧 Troubleshooting
+## 🐛 Debug & Troubleshooting
+
+### Debug Logging
+
+FastRTC includes comprehensive debug logging to help diagnose issues. There are several debug modes you can enable:
+
+#### Debug Environment Variables
+
+Add these to your environment configuration to enable detailed logging:
+
+```bash
+# Enable all debug logging
+DEBUG_TIMING=true       # Performance timing for all operations
+DEBUG_TTS=true          # Text-to-Speech processing details  
+DEBUG_STREAMING=true    # Step-by-step streaming pipeline logs
+DEBUG_MEMORY=true       # Memory system operations
+LOG_LEVEL=DEBUG         # Show all debug messages
+```
+
+#### Quick Debug Setup
+
+**Option 1: Edit environment file directly**
+```bash
+# For development mode
+vim .env.development
+
+# Add these lines:
+DEBUG_TIMING=true
+DEBUG_TTS=true  
+DEBUG_STREAMING=true
+LOG_LEVEL=DEBUG
+```
+
+**Option 2: Create local override file**
+```bash
+# Create .env.local (takes precedence over other configs)
+cat > .env.local << EOF
+# Enhanced Debug Logging
+DEBUG_TIMING=true
+DEBUG_TTS=true
+DEBUG_STREAMING=true
+DEBUG_MEMORY=true
+LOG_LEVEL=DEBUG
+EOF
+```
+
+**Option 3: Runtime environment variables** (Development mode only)
+```bash
+# Export for current session
+export DEBUG_STREAMING=true
+export DEBUG_TTS=true
+export LOG_LEVEL=DEBUG
+
+# Start development mode
+./fastrtc.sh dev
+```
+
+#### What Each Debug Mode Shows
+
+**DEBUG_STREAMING=true:**
+```
+🎯 Step 1: Starting STT processing (audio size: 16000 samples)
+🔍 Step 2: Quality check - Text: 'hello world' (confidence: 0.95, words: 2)
+✅ Step 3: Starting LLM→TTS pipeline for: 'hello world'
+🧠 Step 4: Starting LLM streaming for: 'hello world'
+📝 Step 5: Sentence #1 complete: 'Hello! How can I help you?' (after 24 tokens)
+✂️ Sentence split: Found ending '!' in: 'Hello! How can I help you?'
+```
+
+**DEBUG_TTS=true:**
+```
+🔤 TTS Text Input: 'Hello! How can I help you?' (length: 27 chars, words: 6)
+🔧 TTS Options: voice='af_sarah', lang='en-us', speed=1.05
+🌊 TTS Stream Input: 'Hello!' (length: 6 chars, words: 1)
+📝 TTS Sentence Input: 'Hello!' (length: 6 chars, words: 1, voice: af_sarah, lang: en)
+```
+
+**DEBUG_TIMING=true:**
+```
+⏱️ TTS Synthesis: 0.234s
+⏱️ STT Processing: 0.156s  
+⏱️ LLM to TTS Pipeline: 1.234s
+⏱️ Full Audio Stream Processing: 1.625s
+```
+
+**DEBUG_MEMORY=true:**
+```
+🧠 Memory retrieval: 0.045s (3 relevant memories found)
+💾 Memory storage: 0.023s (conversation saved)
+🔍 A-MEM query: 'user said hello' -> 2 matches
+```
+
+#### Debugging Specific Issues
+
+**TTS Word-Breaking Issues:**
+```bash
+# Enable streaming and TTS debug to see sentence detection
+DEBUG_STREAMING=true
+DEBUG_TTS=true
+
+# Look for these logs:
+# ✂️ Sentence split: Found ending '.' in: 'complete sentence'
+# ⚠️ Potential word break: 'incompl'  # Should not appear
+```
+
+**Audio Processing Issues:**
+```bash
+# Full pipeline visibility
+DEBUG_STREAMING=true
+DEBUG_TIMING=true
+
+# Watch for:
+# 🎯 Step 1: Starting STT processing
+# ❌ Step 1: No transcript result - yielding empty
+```
+
+**Performance Issues:**
+```bash
+# Timing analysis
+DEBUG_TIMING=true
+
+# Look for slow operations:
+# ⏱️ TTS Synthesis: 2.345s  # Should be < 1s typically
+# ⚠️ Slow streaming request: 3.456s
+```
+
+#### Testing Debug Features
+
+You can test the debug logging with the included test script:
+
+```bash
+# Activate virtual environment and run tests
+cd backend
+source venv/bin/activate
+python test_sentence_detection_fixes.py
+
+# Tests word-breaking fixes and sentence detection logic
+# Shows comprehensive validation of streaming improvements
+```
 
 ### Script Issues
 ```bash

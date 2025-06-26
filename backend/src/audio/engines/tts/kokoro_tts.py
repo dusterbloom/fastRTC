@@ -3,6 +3,7 @@
 import time
 import logging
 import asyncio
+import os
 import numpy as np
 from typing import List, Dict, Any, Optional, Generator, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from .base import BaseTTSEngine
 from ....core.interfaces import AudioData
 from ....core.exceptions import TTSError
 from ....config.language_config import KOKORO_VOICE_MAP, KOKORO_TTS_LANG_MAP, DEFAULT_LANGUAGE
-from ....utils.logging import get_logger
+from ....utils.logging import get_logger, time_tts, create_tts_timer
 
 logger = get_logger(__name__)
 logger.setLevel(logging.INFO)
@@ -97,6 +98,7 @@ class KokoroTTSEngine(BaseTTSEngine):
             logger.error(f"❌ Failed to load Kokoro TTS model: {e}")
             self._set_available(False)
     
+    @time_tts("TTS Synthesis")
     async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
         """Synthesize text using Kokoro TTS.
         
@@ -112,6 +114,10 @@ class KokoroTTSEngine(BaseTTSEngine):
             raise TTSError("Kokoro TTS model not initialized")
         
         try:
+            # Debug: Log the text being synthesized
+            if os.getenv("DEBUG_TTS", "false").lower() == "true":
+                logger.debug(f"🔤 TTS Text Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
+            
             # Prepare TTS options
             options_params = {"speed": 1.05}
             kokoro_tts_lang = KOKORO_TTS_LANG_MAP.get(language, 'en-us')
@@ -121,7 +127,12 @@ class KokoroTTSEngine(BaseTTSEngine):
                 options_params["voice"] = voice
             
             tts_options = KokoroTTSOptions(**options_params)
-            logger.info(f"🔊 Synthesizing with voice '{voice}', lang '{kokoro_tts_lang}'")
+            
+            # Enhanced logging with debug details
+            if os.getenv("DEBUG_TTS", "false").lower() == "true":
+                logger.debug(f"🔧 TTS Options: voice='{voice}', lang='{kokoro_tts_lang}', speed={options_params['speed']}")
+            else:
+                logger.info(f"🔊 Synthesizing with voice '{voice}', lang '{kokoro_tts_lang}'")
             
             # Run synthesis in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -230,6 +241,7 @@ class KokoroTTSEngine(BaseTTSEngine):
         voices = KOKORO_VOICE_MAP.get(language, KOKORO_VOICE_MAP.get(DEFAULT_LANGUAGE, []))
         return voices.copy() if voices else []
     
+    @time_tts("TTS Stream Synthesis")
     def stream_synthesis(self, text: str, voice: str, language: str) -> Generator[Tuple[int, np.ndarray], None, None]:
         """Stream synthesis results as they are generated.
         
@@ -245,6 +257,10 @@ class KokoroTTSEngine(BaseTTSEngine):
             raise TTSError("Kokoro TTS model not initialized")
         
         try:
+            # Debug: Log the text being streamed
+            if os.getenv("DEBUG_TTS", "false").lower() == "true":
+                logger.debug(f"🌊 TTS Stream Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
+            
             # Prepare TTS options
             options_params = {"speed": 1.05}
             kokoro_tts_lang = KOKORO_TTS_LANG_MAP.get(language, 'en-us')
@@ -254,7 +270,12 @@ class KokoroTTSEngine(BaseTTSEngine):
                 options_params["voice"] = voice
             
             tts_options = KokoroTTSOptions(**options_params)
-            logger.info(f"🔊 Streaming synthesis with voice '{voice}', lang '{kokoro_tts_lang}'")
+            
+            # Enhanced logging
+            if os.getenv("DEBUG_TTS", "false").lower() == "true":
+                logger.debug(f"🔧 Stream TTS Options: voice='{voice}', lang='{kokoro_tts_lang}', speed={options_params['speed']}")
+            else:
+                logger.info(f"🔊 Streaming synthesis with voice '{voice}', lang '{kokoro_tts_lang}'")
             
             chunk_count = 0
             total_samples = 0
@@ -266,8 +287,8 @@ class KokoroTTSEngine(BaseTTSEngine):
                         chunk_count += 1
                         total_samples += audio_array.size
                         
-                        # Yield smaller chunks to prevent timeouts
-                        chunk_size = min(1024, audio_array.size)
+                        # Yield optimized chunks to prevent timeouts and audio artifacts
+                        chunk_size = min(2048, audio_array.size)  # Increased from 1024 to 2048
                         for i in range(0, audio_array.size, chunk_size):
                             mini_chunk = audio_array[i:i+chunk_size]
                             if mini_chunk.size > 0:
@@ -278,7 +299,7 @@ class KokoroTTSEngine(BaseTTSEngine):
                     total_samples += tts_output_item.size
                     sample_rate = 24000  # Kokoro default
                     
-                    chunk_size = min(1024, tts_output_item.size)
+                    chunk_size = min(2048, tts_output_item.size)  # Increased from 1024 to 2048
                     for i in range(0, tts_output_item.size, chunk_size):
                         mini_chunk = tts_output_item[i:i+chunk_size]
                         if mini_chunk.size > 0:
@@ -310,6 +331,7 @@ class KokoroTTSEngine(BaseTTSEngine):
         
         return info
     
+    @time_tts("TTS Async Stream Synthesis")
     async def stream_synthesis_async(self, text: str, voice: str, language: str) -> "AsyncGenerator[Tuple[int, np.ndarray], None]":
         """
         Async streaming synthesis for real-time conversation flow.
@@ -335,7 +357,13 @@ class KokoroTTSEngine(BaseTTSEngine):
                 options_params["voice"] = voice
             
             tts_options = KokoroTTSOptions(**options_params)
-            logger.debug(f"🔊 Async streaming synthesis: '{text[:50]}...' with voice '{voice}', lang '{kokoro_tts_lang}'")
+            
+            # Enhanced debug logging for async streaming
+            if os.getenv("DEBUG_TTS", "false").lower() == "true":
+                logger.debug(f"🌊 TTS Async Stream Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
+                logger.debug(f"🔧 Async Stream TTS Options: voice='{voice}', lang='{kokoro_tts_lang}', speed={options_params['speed']}")
+            else:
+                logger.debug(f"🔊 Async streaming synthesis: '{text[:50]}...' with voice '{voice}', lang '{kokoro_tts_lang}'")
             
             # Run synthesis in executor to avoid blocking the event loop
             loop = asyncio.get_event_loop()
@@ -353,8 +381,8 @@ class KokoroTTSEngine(BaseTTSEngine):
                             chunk_count += 1
                             total_samples += audio_array.size
                             
-                            # Split into smaller chunks for responsiveness
-                            chunk_size = min(512, audio_array.size)  # Smaller chunks for streaming
+                            # Split into optimized chunks for smooth streaming without artifacts
+                            chunk_size = min(1536, audio_array.size)  # Increased from 512 to 1536 for better audio quality
                             for i in range(0, audio_array.size, chunk_size):
                                 mini_chunk = audio_array[i:i+chunk_size]
                                 if mini_chunk.size > 0:
@@ -365,7 +393,7 @@ class KokoroTTSEngine(BaseTTSEngine):
                         total_samples += tts_output_item.size
                         sample_rate = 24000  # Kokoro default
                         
-                        chunk_size = min(512, tts_output_item.size)
+                        chunk_size = min(1536, tts_output_item.size)  # Increased from 512 to 1536 for better audio quality
                         for i in range(0, tts_output_item.size, chunk_size):
                             mini_chunk = tts_output_item[i:i+chunk_size]
                             if mini_chunk.size > 0:
@@ -387,6 +415,7 @@ class KokoroTTSEngine(BaseTTSEngine):
             logger.error(f"❌ Async streaming synthesis failed: {e}")
             raise TTSError(f"Async streaming synthesis failed: {e}") from e
     
+    @time_tts("TTS Sentence Synthesis")
     async def synthesize_sentence_async(self, sentence: str, voice: str, language: str) -> "AsyncGenerator[Tuple[int, np.ndarray], None]":
         """
         Synthesize a single sentence asynchronously for sentence-level streaming.
@@ -403,7 +432,11 @@ class KokoroTTSEngine(BaseTTSEngine):
         if not sentence.strip():
             return
             
-        logger.debug(f"🔊 Synthesizing sentence: '{sentence}' (voice: {voice}, lang: {language})")
+        # Enhanced sentence debug logging
+        if os.getenv("DEBUG_TTS", "false").lower() == "true":
+            logger.debug(f"📝 TTS Sentence Input: '{sentence}' (length: {len(sentence)} chars, words: {len(sentence.split())}, voice: {voice}, lang: {language})")
+        else:
+            logger.debug(f"🔊 Synthesizing sentence: '{sentence}' (voice: {voice}, lang: {language})")
         
         async for sample_rate, audio_chunk in self.stream_synthesis_async(sentence, voice, language):
             yield (sample_rate, audio_chunk)

@@ -6,6 +6,7 @@ Optimized for immediate response and fluid conversation UX.
 """
 
 import asyncio
+import os
 import time
 import numpy as np
 from typing import AsyncGenerator, Tuple, Any, Optional, TYPE_CHECKING
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 
 from ..core.interfaces import TranscriptionResult
 from ..audio import STTEngine, KokoroTTSEngine, VoiceMapper
-from ..utils.logging import get_logger
+from ..utils.logging import get_logger, time_streaming, create_streaming_timer
 from ..config.audio_config import AUDIO_SAMPLE_RATE, SILENT_AUDIO_FRAME_TUPLE
 
 logger = get_logger(__name__)
@@ -40,6 +41,7 @@ class StreamingPipeline:
         self.confidence_threshold = 0.6
         self.min_words_for_processing = 2
         
+    @time_streaming("Full Audio Stream Processing")
     async def process_audio_stream(self, audio_array: np.ndarray, sample_rate: int) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Process audio through full streaming pipeline.
@@ -52,30 +54,47 @@ class StreamingPipeline:
             Audio chunks from TTS streaming
         """
         try:
-            # Immediate STT processing - no buffering
+            # Step 1: STT Processing
+            if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                logger.debug(f"🎯 Step 1: Starting STT processing (audio size: {audio_array.size} samples)")
+            
             transcript_result = await self._stream_stt(audio_array)
             
             if not transcript_result or not transcript_result.text.strip():
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                    logger.debug("❌ Step 1: No transcript result - yielding empty")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
                 
             user_text = transcript_result.text.strip()
             
+            # Step 2: Confidence and Quality Checks  
+            if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                confidence = getattr(transcript_result, 'confidence', 'unknown')
+                logger.debug(f"🔍 Step 2: Quality check - Text: '{user_text}' (confidence: {confidence}, words: {len(user_text.split())})")
+            
             # Check confidence before proceeding
             if hasattr(transcript_result, 'confidence') and transcript_result.confidence < self.confidence_threshold:
                 # Store partial but don't process yet
                 self.partial_transcript = user_text
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                    logger.debug(f"⚠️ Step 2: Low confidence ({transcript_result.confidence}) - storing partial")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
                 
             # Check minimum words threshold
             if len(user_text.split()) < self.min_words_for_processing:
                 self.partial_transcript = user_text
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                    logger.debug(f"⚠️ Step 2: Insufficient words ({len(user_text.split())}) - storing partial")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
                 
-            # Process complete utterance
-            logger.info(f"🎤 Processing: '{user_text}'")
+            # Step 3: Start LLM→TTS Pipeline
+            if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                logger.debug(f"✅ Step 3: Starting LLM→TTS pipeline for: '{user_text}'")
+            else:
+                logger.info(f"🎤 Processing: '{user_text}'")
             
             # Stream LLM→TTS pipeline
             async for audio_chunk in self._stream_llm_to_tts(user_text):
@@ -85,6 +104,7 @@ class StreamingPipeline:
             logger.error(f"❌ Streaming pipeline error: {e}")
             yield EMPTY_AUDIO_YIELD_OUTPUT
     
+    @time_streaming("STT Processing")
     async def _stream_stt(self, audio_array: np.ndarray) -> Optional[TranscriptionResult]:
         """
         Stream STT processing with immediate results.
@@ -103,6 +123,7 @@ class StreamingPipeline:
             logger.error(f"❌ STT streaming error: {e}")
             return None
     
+    @time_streaming("LLM to TTS Pipeline")
     async def _stream_llm_to_tts(self, user_text: str) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Stream LLM response directly to TTS as tokens arrive.
@@ -114,23 +135,45 @@ class StreamingPipeline:
             Audio chunks from streaming TTS
         """
         sentence_buffer = ""
+        token_count = 0
+        sentence_count = 0
         
         try:
+            if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                logger.debug(f"🧠 Step 4: Starting LLM streaming for: '{user_text}'")
+            
             # Get streaming LLM response
             async for token in self.voice_assistant.llm_service.stream_response(user_text):
                 sentence_buffer += token
+                token_count += 1
+                
+                # Debug token accumulation
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true" and token_count % 10 == 0:
+                    logger.debug(f"🔤 Token progress: {token_count} tokens, buffer: '{sentence_buffer[-50:]}...'")
                 
                 # Check for sentence completion
                 if self._is_sentence_complete(sentence_buffer):
+                    sentence_count += 1
+                    sentence_to_synthesize = sentence_buffer.strip()
+                    
+                    if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                        logger.debug(f"📝 Step 5: Sentence #{sentence_count} complete: '{sentence_to_synthesize}' (after {token_count} tokens)")
+                    
                     # Stream this sentence to TTS immediately
-                    async for audio_chunk in self._stream_sentence_to_tts(sentence_buffer.strip()):
+                    async for audio_chunk in self._stream_sentence_to_tts(sentence_to_synthesize):
                         yield audio_chunk
                     
                     sentence_buffer = ""
             
             # Process any remaining content
             if sentence_buffer.strip():
-                async for audio_chunk in self._stream_sentence_to_tts(sentence_buffer.strip()):
+                sentence_count += 1
+                remaining_text = sentence_buffer.strip()
+                
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                    logger.debug(f"🔚 Step 6: Final sentence #{sentence_count}: '{remaining_text}' (total tokens: {token_count})")
+                
+                async for audio_chunk in self._stream_sentence_to_tts(remaining_text):
                     yield audio_chunk
                     
         except Exception as e:
@@ -142,6 +185,7 @@ class StreamingPipeline:
     def _is_sentence_complete(self, text: str) -> bool:
         """
         Check if text contains a complete sentence for TTS.
+        Uses improved logic to prevent word-breaking issues.
         
         Args:
             text: Text to check
@@ -152,26 +196,98 @@ class StreamingPipeline:
         if not text.strip():
             return False
             
-        # Sentence endings
+        text_stripped = text.rstrip()
+        words = text.split()
+        
+        # Sentence endings - highest priority
         sentence_endings = ['.', '!', '?', '...']
-        
-        # Check for clear sentence endings
         for ending in sentence_endings:
-            if text.rstrip().endswith(ending):
+            if text_stripped.endswith(ending):
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                    logger.debug(f"✂️ Sentence split: Found ending '{ending}' in: '{text_stripped}'")
                 return True
         
-        # For streaming, also consider natural pauses
-        natural_pauses = [', ', ' and ', ' but ', ' so ']
-        for pause in natural_pauses:
-            if pause in text and len(text.split()) >= 8:  # Long enough phrase
+        # For streaming, consider natural pauses but only at word boundaries
+        # and with more conservative thresholds to prevent word-breaking
+        if len(words) >= 10:  # Increased threshold from 8 to 10
+            natural_pauses = [
+                ', and ', ', but ', ', so ', ', however ', ', therefore ',
+                ', because ', ', although ', ', while ', ', when ', ', if '
+            ]
+            for pause in natural_pauses:
+                if pause in text and self._ends_at_word_boundary(text, pause):
+                    if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                        logger.debug(f"✂️ Sentence split: Found natural pause '{pause}' at word boundary in: '{text}'")
+                    return True
+        
+        # More conservative length-based completion
+        # Only trigger for very long phrases and ensure we're at a word boundary
+        if len(words) >= 20:  # Increased threshold from 15 to 20
+            # Check if we can find a good breaking point
+            if self._find_safe_break_point(text):
+                if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
+                    logger.debug(f"✂️ Sentence split: Length-based break at {len(words)} words: '{text}'")
                 return True
-                
-        # Consider length-based completion for very long phrases
-        if len(text.split()) >= 15:
-            return True
-            
+        
         return False
     
+    def _ends_at_word_boundary(self, text: str, pause: str) -> bool:
+        """
+        Check if text after a pause ends at a safe word boundary.
+        
+        Args:
+            text: Full text to check
+            pause: Pause pattern to look for
+            
+        Returns:
+            True if safe to break after the pause
+        """
+        pause_index = text.rfind(pause)
+        if pause_index == -1:
+            return False
+        
+        # Get text after the pause
+        after_pause = text[pause_index + len(pause):].strip()
+        
+        # Don't break if there's only a partial word after the pause
+        if not after_pause or len(after_pause.split()) < 3:
+            return False
+        
+        # Don't break if the last word looks incomplete (no vowel or very short)
+        last_word = after_pause.split()[-1].lower()
+        if len(last_word) < 3 or not any(c in last_word for c in 'aeiou'):
+            return False
+        
+        return True
+    
+    def _find_safe_break_point(self, text: str) -> bool:
+        """
+        Find a safe point to break long text without cutting words.
+        
+        Args:
+            text: Text to find break point in
+            
+        Returns:
+            True if a safe break point exists
+        """
+        words = text.split()
+        if len(words) < 15:
+            return False
+        
+        # Look for safe breaking points in the latter half of the text
+        start_search = len(words) // 2
+        
+        for i in range(start_search, len(words) - 2):  # Leave at least 2 words after break
+            word = words[i].lower()
+            
+            # Safe break points: complete words that commonly end clauses
+            safe_endings = ['that', 'which', 'where', 'when', 'because', 'since', 'while']
+            if word.rstrip('.,;:') in safe_endings:
+                return True
+        
+        return False
+    
+    @time_streaming("Sentence to TTS")
     async def _stream_sentence_to_tts(self, sentence: str) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Stream a sentence through TTS engine.
@@ -195,8 +311,8 @@ class StreamingPipeline:
                 sentence, voice_id, current_language
             ):
                 if isinstance(audio_chunk, np.ndarray) and audio_chunk.size > 0:
-                    # Yield in smaller chunks for responsiveness
-                    chunk_size = 1024
+                    # Yield in optimized chunks for smooth playback without artifacts
+                    chunk_size = 2048  # Increased from 1024 to 2048 for better audio quality
                     for i in range(0, audio_chunk.size, chunk_size):
                         mini_chunk = audio_chunk[i:i+chunk_size]
                         if mini_chunk.size > 0:
