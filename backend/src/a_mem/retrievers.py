@@ -95,39 +95,39 @@ class ChromaRetriever:
         
         self.user_id = user_id
         self.base_collection_name = "memories" if collection_name.startswith("memories_user_") else collection_name
-        print(f"[DEBUG] ChromaRetriever.__init__: Starting with persist_directory={persist_directory}")
+        logger.debug(f"ChromaRetriever.__init__: Starting with persist_directory={persist_directory}")
         # Create persist directory if it doesn't exist
         os.makedirs(persist_directory, exist_ok=True)
         
         # Use PersistentClient instead of Client for persistent storage!
-        print("[DEBUG] ChromaRetriever.__init__: About to create PersistentClient")
+        logger.debug("ChromaRetriever.__init__: About to create PersistentClient")
         logger.info(f"🧠 Profiling: Initializing ChromaDB PersistentClient at {persist_directory}...")
         client_init_start_time = time.monotonic()
         self.client = chromadb.PersistentClient(path=persist_directory)
         client_init_duration = time.monotonic() - client_init_start_time
-        print(f"[DEBUG] ChromaRetriever.__init__: PersistentClient created in {client_init_duration:.2f}s")
+        logger.debug(f"ChromaRetriever.__init__: PersistentClient created in {client_init_duration:.2f}s")
         logger.info(f"🧠 Profiling: ChromaDB PersistentClient initialized in {client_init_duration:.2f}s")
 
-        print(f"[DEBUG] ChromaRetriever.__init__: About to create OllamaEmbeddingFunction with {model_name}")
+        logger.debug(f"ChromaRetriever.__init__: About to create OllamaEmbeddingFunction with {model_name}")
         logger.info(f"🚀 Profiling: Initializing OllamaEmbeddingFunction with model {model_name}...")
         ollama_load_start_time = time.monotonic()
         self.embedding_function = OllamaEmbeddingFunction(model_name=model_name)
         ollama_load_duration = time.monotonic() - ollama_load_start_time
-        print(f"[DEBUG] ChromaRetriever.__init__: OllamaEmbeddingFunction created in {ollama_load_duration:.2f}s")
+        logger.debug(f"ChromaRetriever.__init__: OllamaEmbeddingFunction created in {ollama_load_duration:.2f}s")
         logger.info(f"🚀 Profiling: OllamaEmbeddingFunction ({model_name}) initialized in {ollama_load_duration:.2f}s")
 
-        print(f"[DEBUG] ChromaRetriever.__init__: About to get/create collection '{collection_name}'")
+        logger.debug(f"ChromaRetriever.__init__: About to get/create collection '{collection_name}'")
         logger.info(f"🧠 Profiling: Getting or creating ChromaDB collection '{collection_name}'...")
         collection_init_start_time = time.monotonic()
         
         # Try to get the collection first to check for embedding function conflicts
         try:
-            print(f"[DEBUG] ChromaRetriever.__init__: Calling get_or_create_collection")
+            logger.debug("ChromaRetriever.__init__: Calling get_or_create_collection")
             self.collection = self.client.get_or_create_collection(
                 name=collection_name,
                 embedding_function=self.embedding_function
             )
-            print(f"[DEBUG] ChromaRetriever.__init__: get_or_create_collection completed successfully")
+            logger.debug("ChromaRetriever.__init__: get_or_create_collection completed successfully")
         except ValueError as e:
             if "Embedding function conflict" in str(e):
                 logger.warning(f"🔄 Embedding function conflict detected for collection '{collection_name}'")

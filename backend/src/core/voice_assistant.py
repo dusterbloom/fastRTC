@@ -25,9 +25,10 @@ from ..memory import AMemMemoryManager, ResponseCache, ConversationBuffer
 from ..services import LLMService, AsyncManager
 from src.config.settings import load_config
 from ..config.language_config import LANGUAGE_NAMES, WHISPER_TO_KOKORO_LANG, DEFAULT_LANGUAGE
-from ..utils.logging import get_logger
+from ..utils.logging import get_logger, get_conversation_logger
 
 logger = get_logger(__name__)
+conversation_logger = get_conversation_logger(__name__)
 
 # Centralized configuration
 config = load_config()
@@ -72,44 +73,44 @@ class VoiceAssistant:
             async_manager: Async operations manager
             config: Application configuration (required)
         """
-        print("[DEBUG] VoiceAssistant.__init__: Starting initialization")
+        logger.debug("VoiceAssistant.__init__: Starting initialization")
         logger.info("🧠 Initializing VoiceAssistant with dependency injection...")
 
         # Store configuration
-        print("[DEBUG] VoiceAssistant.__init__: Storing config")
+        logger.debug("VoiceAssistant.__init__: Storing config")
         self.config = config
 
         # Session and user tracking (set early for memory manager)
-        print("[DEBUG] VoiceAssistant.__init__: Setting user ID and session ID")
+        logger.debug("VoiceAssistant.__init__: Setting user ID and session ID")
         self.user_id = "guest_user"  # Default guest user until identification
         self.session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         self.user_identified = False
         self.identified_name = None  # Store the identified name separately
 
         # Initialize or use provided components
-        print("[DEBUG] VoiceAssistant.__init__: Creating audio processor")
+        logger.debug("VoiceAssistant.__init__: Creating audio processor")
         self.audio_processor = audio_processor or BluetoothAudioProcessor()
-        print("[DEBUG] VoiceAssistant.__init__: Creating STT engine")
+        logger.debug("VoiceAssistant.__init__: Creating STT engine")
         self.stt_engine = stt_engine or STTEngine()
-        print("[DEBUG] VoiceAssistant.__init__: Creating TTS engine")
+        logger.debug("VoiceAssistant.__init__: Creating TTS engine")
         self.tts_engine = tts_engine or KokoroTTSEngine()
-        print("[DEBUG] VoiceAssistant.__init__: Creating voice mapper")
+        logger.debug("VoiceAssistant.__init__: Creating voice mapper")
         self.voice_mapper = voice_mapper or VoiceMapper()
-        print("[DEBUG] VoiceAssistant.__init__: Creating response cache")
+        logger.debug("VoiceAssistant.__init__: Creating response cache")
         self.response_cache = response_cache or ResponseCache()
-        print("[DEBUG] VoiceAssistant.__init__: Creating conversation buffer")
+        logger.debug("VoiceAssistant.__init__: Creating conversation buffer")
         self.conversation_buffer = conversation_buffer or ConversationBuffer()
-        print("[DEBUG] VoiceAssistant.__init__: Creating LLM service")
+        logger.debug("VoiceAssistant.__init__: Creating LLM service")
         self.llm_service = llm_service or LLMService()
-        print("[DEBUG] VoiceAssistant.__init__: Creating async manager")
+        logger.debug("VoiceAssistant.__init__: Creating async manager")
         self.async_manager = async_manager or AsyncManager()
-        print("[DEBUG] VoiceAssistant.__init__: Creating voice print manager")
+        logger.debug("VoiceAssistant.__init__: Creating voice print manager")
         self.voice_print_manager = SpokenUserIdentifier()
 
         # Initialize memory manager with Qdrant setup
-        print("[DEBUG] VoiceAssistant.__init__: About to setup memory manager")
+        logger.debug("VoiceAssistant.__init__: About to setup memory manager")
         self.memory_manager = memory_manager or self._setup_memory_manager()
-        print("[DEBUG] VoiceAssistant.__init__: Memory manager setup complete")
+        logger.debug("VoiceAssistant.__init__: Memory manager setup complete")
 
         # Conversation state
         config_default_lang = self.config.audio.get("default_language", "en") if hasattr(self.config.audio, "get") else getattr(self.config.audio, "default_language", "en")
@@ -293,10 +294,15 @@ class VoiceAssistant:
         Returns:
             Generated assistant response
         """
+        # Log user input prominently
+        conversation_logger.log_user_input(user_text)
+        
         # Check cache first
         cached_response = self.get_cached_response(user_text) # In VoiceAssistant
         if cached_response:
             logger.info("📋 Using cached response")
+            # Log cached assistant response prominently
+            conversation_logger.log_assistant_response(cached_response)
             return cached_response
         
         # Generate new response using LLM service
@@ -343,6 +349,9 @@ class VoiceAssistant:
         # Update memory and cache
         await self.memory_manager.add_to_memory_smart(user_text, response) # AMemMemoryManager
         self.cache_response(user_text, response) # VoiceAssistant's cache
+        
+        # Log assistant response prominently
+        conversation_logger.log_assistant_response(response)
         
         return response
     

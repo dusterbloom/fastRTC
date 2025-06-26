@@ -59,29 +59,29 @@ class AMemMemoryManager(MemoryManager):
         Raises:
             MemoryError: If A-MEM system initialization fails
         """
-        print("[DEBUG] AMemMemoryManager.__init__: Starting initialization")
+        logger.debug("AMemMemoryManager.__init__: Starting initialization")
         if AgenticMemorySystem is None:
             raise MemoryError("A-MEM system not available. Please install a_mem package.")
             
-        print("[DEBUG] AMemMemoryManager.__init__: Setting user_id")
+        logger.debug("AMemMemoryManager.__init__: Setting user_id")
         self.user_id = user_id
-        print("[DEBUG] AMemMemoryManager.__init__: Creating executor")
+        logger.debug("AMemMemoryManager.__init__: Creating executor")
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="amem_exec")
-        print("[DEBUG] AMemMemoryManager.__init__: Setting up memory cache")
+        logger.debug("AMemMemoryManager.__init__: Setting up memory cache")
         self.memory_cache = {
             'user_name': None, 
             'preferences': {}, 
             'facts': {}, 
             'last_updated': None
         }
-        print("[DEBUG] AMemMemoryManager.__init__: Creating memory queue")
+        logger.debug("AMemMemoryManager.__init__: Creating memory queue")
         self.memory_queue = asyncio.Queue()
         self.background_task: Optional[asyncio.Task] = None
         self.memory_operations = 0
         self.cache_hits = 0
         
         # Initialize A-MEM system
-        print("[DEBUG] AMemMemoryManager.__init__: About to create AgenticMemorySystem")
+        logger.debug("AMemMemoryManager.__init__: About to create AgenticMemorySystem")
         try:
             self.amem_system = AgenticMemorySystem(
                 model_name=amem_model,
@@ -90,10 +90,10 @@ class AMemMemoryManager(MemoryManager):
                 evo_threshold=evo_threshold,
                 user_id=self.user_id  # Pass user_id for user-scoped memory
             )
-            print("[DEBUG] AMemMemoryManager.__init__: AgenticMemorySystem created successfully")
+            logger.debug("AMemMemoryManager.__init__: AgenticMemorySystem created successfully")
             logger.info("🧠 A-MEM system initialized successfully")
         except Exception as e:
-            print(f"[DEBUG] AMemMemoryManager.__init__: AgenticMemorySystem creation failed: {e}")
+            logger.debug(f"AMemMemoryManager.__init__: AgenticMemorySystem creation failed: {e}")
             logger.error(f"❌ A-MEM initialization failed: {e}")
             raise MemoryError(f"Failed to initialize A-MEM system: {e}")
         
@@ -533,14 +533,17 @@ class AMemMemoryManager(MemoryManager):
         Raises:
             MemoryError: If memory storage fails
         """
+        logger.debug(f"[DEBUG] add_memory called with user_text: '{user_text}', assistant_text: '{assistant_text}'")
         # Always increment memory operations counter, even if we don't store
         self.memory_operations += 1
         
         should_store, category = self.should_store_memory(user_text, assistant_text)
+        logger.debug(f"[DEBUG] should_store: {should_store}, category: {category}")
         if not should_store:
             return None
         
         self.update_local_cache(user_text, category, is_current_turn_extraction=False)
+        logger.debug(f"[DEBUG] After update_local_cache, memory_cache: {self.memory_cache}")
         
         if self.memory_queue:
             await self.memory_queue.put(('add', user_text, assistant_text, category))

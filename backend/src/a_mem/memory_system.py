@@ -149,28 +149,28 @@ class AgenticMemorySystem:
             api_key: API key for the LLM service
             user_id: User identifier for user-scoped memory isolation
         """
-        print("[DEBUG] AgenticMemorySystem.__init__: Starting initialization")
+        logger.debug("AgenticMemorySystem.__init__: Starting initialization")
         self.memories = {}
         self.model_name = model_name
         self.user_id = user_id or "default_user"
         
         # Create retriever with persistent storage and user isolation
-        print("[DEBUG] AgenticMemorySystem.__init__: About to create ChromaRetriever")
+        logger.debug("AgenticMemorySystem.__init__: About to create ChromaRetriever")
         self.retriever = ChromaRetriever(
             collection_name="memories",
             model_name=self.model_name,
             persist_directory="backend/chroma_db",  # This will persist!
             user_id=self.user_id  # User-scoped collections
         )
-        print("[DEBUG] AgenticMemorySystem.__init__: ChromaRetriever created successfully")
+        logger.debug("AgenticMemorySystem.__init__: ChromaRetriever created successfully")
         
         # Don't load existing memories here - will be done async later
-        print("[DEBUG] AgenticMemorySystem.__init__: Skipping memory loading (will be done async)")
+        logger.debug("AgenticMemorySystem.__init__: Skipping memory loading (will be done async)")
         
         # Initialize LLM controller
-        print("[DEBUG] AgenticMemorySystem.__init__: About to create LLMController")
+        logger.debug("AgenticMemorySystem.__init__: About to create LLMController")
         self.llm_controller = LLMController(llm_backend, llm_model, api_key)
-        print("[DEBUG] AgenticMemorySystem.__init__: LLMController created successfully")
+        logger.debug("AgenticMemorySystem.__init__: LLMController created successfully")
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
         
@@ -386,7 +386,7 @@ class AgenticMemorySystem:
                     }})
             return json.loads(response)
         except Exception as e:
-            print(f"Error analyzing content: {e}")
+            logger.error(f"Error analyzing content: {e}")
             return {"keywords": [], "context": "General", "tags": []}
 
     def add_note(self, content: str, time: str = None, **kwargs) -> str:

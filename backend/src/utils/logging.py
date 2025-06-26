@@ -6,10 +6,11 @@ from the original monolithic implementation.
 """
 
 import logging
-import logging.handlers
+import os
+import json
 import sys
-from pathlib import Path
-from typing import Optional, Dict, Any
+from logging.handlers import RotatingFileHandler
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 
@@ -27,12 +28,19 @@ COMPONENT_LOG_LEVELS: Dict[str, int] = {
     "backend.stt": logging.INFO,
     "backend.core": logging.INFO,
     "backend.integration": logging.INFO,
-    # External libraries
+    # External libraries - suppress in INFO mode
     "httpx": logging.WARNING,
     "urllib3": logging.WARNING,
     "requests": logging.WARNING,
     "transformers": logging.WARNING,
     "torch": logging.WARNING,
+    "tensorflow": logging.ERROR,
+    "absl": logging.ERROR,
+    "onnxruntime": logging.WARNING,
+    "faster_whisper": logging.WARNING,
+    # Suppress CUDA/GPU warnings in INFO mode
+    "numba": logging.WARNING,
+    "cupy": logging.WARNING,
 }
 
 
@@ -58,6 +66,136 @@ class ColoredFormatter(logging.Formatter):
         record.levelname = f"{log_color}{record.levelname}{reset_color}"
         
         return super().format(record)
+
+
+class ConversationLogger:
+    """Special logger for prominent USER-ASSISTANT conversation display."""
+    
+    def __init__(self, logger: logging.Logger, show_conversation: bool = True):
+        """Initialize conversation logger.
+        
+        Args:
+            logger: Underlying logger instance
+            show_conversation: Whether to display conversations (from environment)
+        """
+        self.logger = logger
+        self.show_conversation = show_conversation
+        
+        # ANSI color codes for conversation
+        self.USER_COLOR = '\033[94m'     # Blue
+        self.ASSISTANT_COLOR = '\033[95m' # Magenta
+        self.BOX_COLOR = '\033[90m'      # Gray
+        self.RESET = '\033[0m'
+    
+    def log_user_input(self, text: str):
+        """Log user input with prominent formatting.
+        
+        Args:
+            text: User's input text
+        """
+        if not self.show_conversation or not text.strip():
+            return
+            
+        # Create boxed user message
+        message_lines = self._wrap_text(text, 70)
+        box_width = max(len(line) for line in message_lines) + 4
+        
+        # Top border
+        top_border = f"{self.BOX_COLOR}┌{'─' * (box_width - 2)}┐{self.RESET}"
+        
+        # Message lines
+        formatted_lines = []
+        for i, line in enumerate(message_lines):
+            if i == 0:
+                prefix = f"{self.USER_COLOR}💬 USER:{self.RESET} "
+            else:
+                prefix = "        "  # Indent continuation lines
+            
+            padding = " " * (box_width - len(prefix) - len(line) - 3)
+            formatted_line = f"{self.BOX_COLOR}│{self.RESET} {prefix}{line}{padding}{self.BOX_COLOR}│{self.RESET}"
+            formatted_lines.append(formatted_line)
+        
+        # Bottom border
+        bottom_border = f"{self.BOX_COLOR}└{'─' * (box_width - 2)}┘{self.RESET}"
+        
+        # Log the complete box
+        self.logger.info("")  # Empty line for separation
+        self.logger.info(top_border)
+        for line in formatted_lines:
+            self.logger.info(line)
+        self.logger.info(bottom_border)
+    
+    def log_assistant_response(self, text: str):
+        """Log assistant response with prominent formatting.
+        
+        Args:
+            text: Assistant's response text
+        """
+        if not self.show_conversation or not text.strip():
+            return
+            
+        # Create boxed assistant message
+        message_lines = self._wrap_text(text, 70)
+        box_width = max(len(line) for line in message_lines) + 4
+        
+        # Top border
+        top_border = f"{self.BOX_COLOR}┌{'─' * (box_width - 2)}┐{self.RESET}"
+        
+        # Message lines
+        formatted_lines = []
+        for i, line in enumerate(message_lines):
+            if i == 0:
+                prefix = f"{self.ASSISTANT_COLOR}🤖 ASSISTANT:{self.RESET} "
+            else:
+                prefix = "             "  # Indent continuation lines
+            
+            padding = " " * (box_width - len(prefix) - len(line) - 3)
+            formatted_line = f"{self.BOX_COLOR}│{self.RESET} {prefix}{line}{padding}{self.BOX_COLOR}│{self.RESET}"
+            formatted_lines.append(formatted_line)
+        
+        # Bottom border
+        bottom_border = f"{self.BOX_COLOR}└{'─' * (box_width - 2)}┘{self.RESET}"
+        
+        # Log the complete box
+        self.logger.info(top_border)
+        for line in formatted_lines:
+            self.logger.info(line)
+        self.logger.info(bottom_border)
+        self.logger.info("")  # Empty line for separation
+    
+    def _wrap_text(self, text: str, width: int) -> List[str]:
+        """Wrap text to specified width.
+        
+        Args:
+            text: Text to wrap
+            width: Maximum line width
+            
+        Returns:
+            List[str]: Wrapped lines
+        """
+        words = text.split()
+        lines = []
+        current_line = []
+        current_length = 0
+        
+        for word in words:
+            # Check if adding this word would exceed width
+            word_length = len(word)
+            if current_length + word_length + len(current_line) > width and current_line:
+                # Start new line
+                lines.append(" ".join(current_line))
+                current_line = [word]
+                current_length = word_length
+            else:
+                # Add to current line
+                current_line.append(word)
+                current_length += word_length
+        
+        # Add remaining words
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        return lines if lines else [""]
 
 
 class VoiceAssistantFilter(logging.Filter):
@@ -150,14 +288,23 @@ def setup_logging(
         file_handler.addFilter(VoiceAssistantFilter())
         root_logger.addHandler(file_handler)
     
-    # Set component-specific log levels
+    # Set component-specific log levels (respecting global minimum)
     component_levels = component_levels or {}
     all_levels = {**COMPONENT_LOG_LEVELS, **component_levels}
     
     for component, level in all_levels.items():
         if isinstance(level, str):
             level = getattr(logging, level.upper(), logging.INFO)
-        logging.getLogger(component).setLevel(level)
+        
+        # Ensure component level is not lower than global level
+        effective_level = max(level, numeric_level)
+        logging.getLogger(component).setLevel(effective_level)
+    
+    # Enforce global level on all existing loggers
+    for name in logging.Logger.manager.loggerDict:
+        existing_logger = logging.getLogger(name)
+        if existing_logger.level < numeric_level:
+            existing_logger.setLevel(numeric_level)
     
     # Log setup completion
     logger = logging.getLogger("backend.logging")
@@ -304,3 +451,18 @@ def get_llm_logger() -> logging.Logger:
 def get_core_logger() -> logging.Logger:
     """Get logger for core components."""
     return get_logger("backend.core")
+
+
+def get_conversation_logger(name: str) -> ConversationLogger:
+    """Get a conversation logger for prominent USER-ASSISTANT display.
+    
+    Args:
+        name: Logger name (usually __name__)
+        
+    Returns:
+        ConversationLogger: Configured conversation logger
+    """
+    import os
+    base_logger = get_logger(name)
+    show_conversation = os.getenv("SHOW_CONVERSATION", "true").lower() == "true"
+    return ConversationLogger(base_logger, show_conversation)

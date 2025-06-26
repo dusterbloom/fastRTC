@@ -43,7 +43,6 @@ class StreamCallbackHandler:
         tts_engine: KokoroTTSEngine,
         voice_mapper: VoiceMapper,
         event_loop=None,
-        adaptive_vad: Optional[SimpleSOTAAdaptiveVAD] = None # Added parameter
     ):
         """
         Initialize the stream callback handler.
@@ -52,17 +51,14 @@ class StreamCallbackHandler:
             voice_assistant: The main voice assistant instance
             stt_engine: Speech-to-text engine
             tts_engine: Text-to-speech engine
-            language_detector: Language detection component
             voice_mapper: Voice mapping component
             event_loop: Async event loop for coroutine execution
-            adaptive_vad: SOTA adaptive VAD instance (optional)
         """
         self.voice_assistant = voice_assistant
         self.stt_engine = stt_engine
         self.tts_engine = tts_engine
         self.voice_mapper = voice_mapper
         self.event_loop = event_loop
-        self.adaptive_vad = adaptive_vad or SimpleSOTAAdaptiveVAD(VADConfig()) # Added initialization
         
         # Sentence buffering for complete sentence detection
         self.sentence_buffer = ""
@@ -109,15 +105,15 @@ class StreamCallbackHandler:
        """
         # DEBUG: Log every callback invocation with enhanced details
         current_time = time.time()
-        print(f"🎤 CALLBACK INVOKED [{current_time:.3f}]: Received audio data: {type(audio_data_tuple)}")
+        logger.debug(f"🎤 CALLBACK INVOKED [{current_time:.3f}]: Received audio data: {type(audio_data_tuple)}")
         try:
             sample_rate, audio_array = audio_data_tuple
             audio_duration = len(audio_array) / sample_rate if sample_rate > 0 else 0
             audio_rms = np.sqrt(np.mean(audio_array**2)) if hasattr(audio_array, 'shape') and audio_array.size > 0 else 0
-            print(f"🎤 CALLBACK: Sample rate: {sample_rate}Hz, Audio shape: {audio_array.shape if hasattr(audio_array, 'shape') else type(audio_array)}")
-            print(f"🎤 CALLBACK: Duration: {audio_duration:.3f}s, RMS: {audio_rms:.6f}, Peak: {np.max(np.abs(audio_array)) if hasattr(audio_array, 'shape') and audio_array.size > 0 else 0:.6f}")
+            logger.debug(f"🎤 CALLBACK: Sample rate: {sample_rate}Hz, Audio shape: {audio_array.shape if hasattr(audio_array, 'shape') else type(audio_array)}")
+            logger.debug(f"🎤 CALLBACK: Duration: {audio_duration:.3f}s, RMS: {audio_rms:.6f}, Peak: {np.max(np.abs(audio_array)) if hasattr(audio_array, 'shape') and audio_array.size > 0 else 0:.6f}")
         except Exception as e:
-            print(f"🎤 CALLBACK ERROR: Failed to parse audio data: {e}")
+            logger.error(f"🎤 CALLBACK ERROR: Failed to parse audio data: {e}")
             pass
         if not self.voice_assistant:
             logger.warning("🎤 process_audio_stream: Voice assistant not initialized. Yielding empty.")
@@ -125,8 +121,7 @@ class StreamCallbackHandler:
             return
         
         try:
-            import numpy as np
-            print(f"🎤 process_audio_stream: Processing incoming audio data...") # Changed to info
+            logger.info(f"🎤 process_audio_stream: Processing incoming audio data...")
             # --- COPY FROM start_original_backup.py ---
             # Process audio input (same as before)
             if isinstance(audio_data_tuple, tuple) and len(audio_data_tuple) == 2:
@@ -156,7 +151,6 @@ class StreamCallbackHandler:
                 TARGET_SAMPLE_RATE = 16000
                 if sample_rate != TARGET_SAMPLE_RATE and audio_array.size > 0:
                     from scipy.signal import resample
-                    import numpy as np
                     num_samples = int(len(audio_array) * TARGET_SAMPLE_RATE / sample_rate)
                     audio_array = resample(audio_array, num_samples)
                     
@@ -172,29 +166,9 @@ class StreamCallbackHandler:
                 yield SILENT_AUDIO_FRAME_TUPLE, AdditionalOutputs()
                 return
             
-            # # --- Adaptive VAD Logic ---
-            # speech_duration_s = len(audio_array) / sample_rate if sample_rate > 0 else 0
-            # if self.adaptive_vad: # Ensure VAD instance exists
-            #     self.adaptive_vad.record_turn(speech_duration_s, audio_array, sample_rate)
-            #     new_vad_options = self.adaptive_vad.get_current_vad_options(speech_duration_s)
-                
-            #     # Log VAD status
-            #     vad_status = self.adaptive_vad.get_status()
-            #     # (Removed verbose debug prints for cleaner terminal output)
-                
-            #     # TODO: Implement dynamic update of FastRTC stream VAD parameters
-            #     # This might involve:
-            #     # 1. Accessing the stream object from self.voice_assistant.fastrtc_bridge
-            #     # 2. Calling a method on the stream object to update its VAD options
-            #     #    (e.g., stream.update_vad_options(new_vad_options))
-            #     # This functionality may need to be added to FastRTCBridge or the fastrtc library.
-            #     # (Removed verbose debug prints for cleaner terminal output)
-            # # --- End Adaptive VAD Logic ---
-            
-            # (Removed verbose debug prints for cleaner terminal output)
+          
             # Perform speech-to-text conversion
             user_text = self._process_speech_to_text(audio_array, sample_rate)
-            # (Removed verbose debug prints for cleaner terminal output)
             
             # Check for buffered content even if current user_text is empty
             if not user_text.strip():
@@ -208,7 +182,6 @@ class StreamCallbackHandler:
             
             # Update statistics
             self.voice_assistant.voice_detection_successes += 1
-            # (Removed verbose debug prints for cleaner terminal output)
             
             # Generate intelligent response
             assistant_response = self._generate_response(user_text)
@@ -465,8 +438,10 @@ class StreamCallbackHandler:
         
         turn_processing_time = time.monotonic() - start_turn_time
         # (Removed verbose debug prints for cleaner terminal output)
-        
+        print(f"[LLM DEBUG] assistant_response_text: '{assistant_response_text}' (length: {len(assistant_response_text)})")
+
         return assistant_response_text
+
     
     def _update_conversation(self, user_text: str, assistant_response: str):
         """

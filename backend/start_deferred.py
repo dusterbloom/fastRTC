@@ -35,8 +35,9 @@ from src.utils.async_utils import AsyncEnvironmentManager
 from src.config.settings import load_config
 from src.utils.logging import get_logger, setup_logging
 
-# Initial setup
-setup_logging("DEBUG")
+# Initial setup - read log level from environment
+log_level = os.getenv("LOG_LEVEL", "INFO")
+setup_logging(log_level)
 logger = get_logger(__name__)
 logger.debug("🚨 TOP LEVEL LOGGER TEST IN START_CLEAN.PY 🚨") # New test log
 

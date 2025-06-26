@@ -58,8 +58,13 @@ MODES:
     docker      Docker testing (Linux/macOS)
     prod        Production deployment (Docker with external IP)
 
+OPTIONS:
+    --log-level LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)
+    --help, -h           Show this help message
+
 EXAMPLES:
     ./fastrtc.sh dev                           # Start local development
+    ./fastrtc.sh dev --log-level INFO          # Development with INFO logging
     ./fastrtc.sh docker                        # Start Docker services
     EXTERNAL_IP=1.2.3.4 ./fastrtc.sh prod     # Production with external IP
     OLLAMA_URL=http://custom:11434 ./fastrtc.sh dev  # Custom service URL
@@ -70,6 +75,12 @@ ENVIRONMENT:
     - .env.docker (docker mode)  
     - .env.production (prod mode)
     - .env.local (user overrides, optional)
+
+LOG LEVELS:
+    DEBUG       Show all technical details, model loading, etc.
+    INFO        Show essential status and prominent conversation display
+    WARNING     Show only warnings and errors
+    ERROR       Show only errors
 
 SHORTCUTS:
     Ctrl+C      Graceful shutdown
@@ -103,16 +114,19 @@ check_dev_dependencies() {
     
     if ! command_exists python3; then
         log_error "Python 3 is required for development mode"
+        log_info "Please install Python 3.8+ from https://python.org/downloads"
         exit 1
     fi
     
     if ! command_exists node; then
         log_error "Node.js is required for development mode"
+        log_info "Please install Node.js 18+ from https://nodejs.org"
         exit 1
     fi
     
     if ! command_exists npm; then
         log_error "npm is required for development mode"
+        log_info "npm comes with Node.js. Please reinstall Node.js"
         exit 1
     fi
     
@@ -143,6 +157,43 @@ check_docker_dependencies() {
     log_success "Docker dependencies verified"
 }
 
+# Create default environment files if missing
+create_default_env_files() {
+    local env_files=(".env.development" ".env.docker" ".env.production")
+    
+    for env_file in "${env_files[@]}"; do
+        if [[ ! -f "$SCRIPT_DIR/$env_file" ]]; then
+            log_info "Creating default $env_file..."
+            cat > "$SCRIPT_DIR/$env_file" << EOF
+# FastRTC Environment Configuration
+# Generated automatically - modify as needed
+
+# Logging level (DEBUG, INFO, WARNING, ERROR)
+LOG_LEVEL=INFO
+
+# Backend settings
+BACKEND_HOST=localhost
+BACKEND_PORT=8000
+
+# Frontend settings  
+FRONTEND_HOST=localhost
+FRONTEND_PORT=3001
+
+# LLM settings
+OLLAMA_URL=http://localhost:11434
+LLM_MODEL=llama3.2:3b
+
+# Redis settings (optional)
+REDIS_URL=redis://localhost:6379
+REDIS_DB=0
+
+# Add any custom environment variables below
+EOF
+            log_success "Created $env_file with default values"
+        fi
+    done
+}
+
 # Load environment variables from file
 load_env_file() {
     local env_file="$1"
@@ -163,6 +214,9 @@ setup_environment() {
     local mode="$1"
     
     log_step "Setting up environment for $mode mode..."
+    
+    # Create default environment files if missing
+    create_default_env_files
     
     # Load mode-specific environment file
     case "$mode" in
@@ -308,9 +362,17 @@ run_development() {
         exit 1
     fi
     
+    # Check and install frontend dependencies
+    log_info "Checking frontend dependencies..."
+    cd "$SCRIPT_DIR/frontend/react-vite"
+    if [[ ! -d "node_modules" ]]; then
+        log_info "Installing frontend dependencies..."
+        npm install
+        log_success "Frontend dependencies installed"
+    fi
+    
     # Start frontend
     log_info "Starting frontend server..."
-    cd "$SCRIPT_DIR/frontend/react-vite"
     # Set port explicitly to avoid conflicts
     PORT=3001 npm run dev &
     FRONTEND_PID=$!
@@ -320,6 +382,17 @@ run_development() {
     if ! health_check "Frontend" "http://localhost:3001"; then
         log_error "Frontend failed to start"
         exit 1
+    fi
+    
+    # Wait for all backend components to fully initialize
+    log_step "Waiting for all components to fully initialize..."
+    sleep 3  # Give VAD and other components time to warm up
+    
+    # Final readiness check
+    if curl -s --max-time 3 "http://localhost:8000/health" | grep -q "healthy" 2>/dev/null; then
+        log_success "All components fully initialized!"
+    else
+        log_warn "Components may still be initializing in background"
     fi
     
     log_success "Development mode started successfully!"
@@ -439,6 +512,56 @@ run_production() {
     docker-compose logs -f
 }
 
+# Parse command line arguments
+parse_arguments() {
+    local mode=""
+    local log_level=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            dev|development|docker|prod|production)
+                if [[ -n "$mode" ]]; then
+                    log_error "Multiple modes specified: $mode and $1"
+                    exit 1
+                fi
+                mode="$1"
+                shift
+                ;;
+            --log-level)
+                if [[ -n "$2" ]] && [[ "$2" =~ ^(DEBUG|INFO|WARNING|ERROR)$ ]]; then
+                    log_level="$2"
+                    shift 2
+                else
+                    log_error "Invalid log level. Use: DEBUG, INFO, WARNING, or ERROR"
+                    exit 1
+                fi
+                ;;
+            -h|--help|help)
+                show_usage
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+        esac
+    done
+    
+    if [[ -z "$mode" ]]; then
+        log_error "No mode specified"
+        show_usage
+        exit 1
+    fi
+    
+    # Export log level for backend to use (but don't log yet)
+    if [[ -n "$log_level" ]]; then
+        export LOG_LEVEL="$log_level"
+    fi
+    
+    echo "$mode"
+}
+
 # Main function
 main() {
     # Show header
@@ -454,8 +577,13 @@ main() {
         exit 1
     fi
     
-    local mode="$1"
-    shift
+    # Parse arguments and get mode
+    local mode=$(parse_arguments "$@")
+    
+    # Show log level if set
+    if [[ -n "$LOG_LEVEL" ]]; then
+        log_info "Log level set to: $LOG_LEVEL"
+    fi
     
     # Detect OS
     detect_os
@@ -470,9 +598,6 @@ main() {
             ;;
         "prod"|"production")
             run_production
-            ;;
-        "help"|"-h"|"--help")
-            show_usage
             ;;
         *)
             log_error "Unknown mode: $mode"

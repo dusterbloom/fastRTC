@@ -35,8 +35,9 @@ from src.config.settings import load_config
 from src.utils.logging import get_logger, setup_logging
 from src.utils.process_killer import force_kill_after_timeout, setup_signal_handlers, kill_child_processes
 
-# Initial setup
-setup_logging("DEBUG")  # Set up logging with DEBUG level
+# Initial setup - read log level from environment
+log_level = os.getenv("LOG_LEVEL", "INFO")
+setup_logging(log_level)
 logger = get_logger(__name__)
 setup_signal_handlers()  # Set up Ctrl+C and kill signal handlers
 logger.debug("🚨 TOP LEVEL LOGGER TEST IN START_CLEAN.PY 🚨") # New test log
