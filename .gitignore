@@ -22,3 +22,4 @@ frontend/react-vite/.env.docker.generated
 backend/.env.local
 # Local development environment files for frontend
 frontend/react-vite/.env.local
+.env.*
