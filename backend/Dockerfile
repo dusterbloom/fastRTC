@@ -15,6 +15,7 @@ WORKDIR /app
 # Copy and install Python dependencies
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade fastrtc
 
 # Copy application code
 COPY backend/ ./backend/
@@ -26,4 +27,4 @@ RUN mkdir -p /app/config/webrtc
 # Expose port (when not using host networking)
 EXPOSE 8000
 
-CMD ["python", "run.py"]
+CMD ["python", "-m", "uvicorn", "backend.start_deferred:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,63 +1,121 @@
+# FastRTC Docker Compose - Simplified Linux/macOS Deployment
+# ============================================================
+# Usage:
+#   - Docker mode: ./fastrtc.sh docker
+#   - Production:  EXTERNAL_IP=your.ip ./fastrtc.sh prod
+# ============================================================
+
+networks:
+  fastrtc-network:
+    driver: bridge
+
+volumes:
+  hf_cache:
+    name: fastrtc_hf_cache
+  coturn_data:
+    name: fastrtc_coturn_data
+
 services:
+  # CoTURN STUN/TURN Server for WebRTC NAT traversal
   coturn:
-    image: instrumentisto/coturn
-    container_name: coturn
+    image: instrumentisto/coturn:4.6
+    container_name: fastrtc-coturn
+    restart: unless-stopped
     ports:
-      - "3478:3478"   # Default port for STUN/TURN
-      - "3478:3478/udp"
-      - "49160-49200:49160-49200/udp"  # Port range for TURN
+      - "3478:3478"          # STUN/TURN
+      - "3478:3478/udp"      # STUN/TURN UDP
+      - "49160-49200:49160-49200/udp"  # TURN relay ports
     environment:
-      - EXTERNAL_IP=auto  # Automatically detect external IP
       - LISTENING_PORT=3478
       - MIN_PORT=49160
       - MAX_PORT=49200
       - USE_AUTH_SECRET=true
-      - STATIC_AUTH_SECRET=your_static_auth_secret
-      - CERT_FILE=/etc/ssl/certs/your_cert.pem
-      - PKEY_FILE=/etc/ssl/private/your_key.pem
+      - STATIC_AUTH_SECRET=${TURN_AUTH_SECRET:-fastrtc-default-secret}
+      - EXTERNAL_IP=${EXTERNAL_IP:-localhost}
+      - REALM=fastrtc.local
+      - NO_CLI=1
+      - NO_TLS=0
+      - NO_DTLS=0
     volumes:
-      - ./certs:/etc/ssl  # Mount the directory containing SSL certificates
-    restart: unless-stopped
+      - coturn_data:/var/lib/coturn
+      - ./certs:/etc/ssl/certs:ro
+    networks:
+      - fastrtc-network
+    command: >
+      turnserver
+      --listening-ip=0.0.0.0
+      --listening-port=3478
+      --min-port=49160
+      --max-port=49200
+      --use-auth-secret
+      --static-auth-secret=${TURN_AUTH_SECRET:-fastrtc-default-secret}
+      --realm=fastrtc.local
+      --no-multicast-peers
+      --no-cli
+      --no-tlsv1
+      --no-tlsv1_1
+      --verbose
 
+  # FastRTC Backend
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: fastrtc-backend
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "8000:8000"
+      - "31001-32000:31001-32000/udp"  # WebRTC media ports
     environment:
+      # WebRTC Configuration
+      - EXTERNAL_IP=${EXTERNAL_IP:-localhost}
+      - STUN_SERVERS=stun:${EXTERNAL_IP:-localhost}:3478
+      - TURN_SERVERS=turn:${EXTERNAL_IP:-localhost}:3478
+      - TURN_AUTH_SECRET=${TURN_AUTH_SECRET:-fastrtc-default-secret}
+      - WEBRTC_MEDIA_PORT_FROM=31001
+      - WEBRTC_MEDIA_PORT_TO=32000
+      # Docker-specific overrides
       - HOST=0.0.0.0
       - PORT=8000
-      - EXTERNAL_IP=${EXTERNAL_IP}
-      - STUN_SERVERS=${STUN_SERVERS:-stun:${EXTERNAL_IP}:3478}
-      - TURN_SERVERS=${TURN_SERVERS:-turn:${EXTERNAL_IP}:3478}
-      - TURN_AUTH_SECRET=${TURN_AUTH_SECRET}
-      - WEBRTC_MEDIA_PORT_FROM=31001
-      - WEBRTC_MEDIA_PORT_TO=40000
+      - HF_HOME=/root/.cache/huggingface
+      - PYTHONUNBUFFERED=1
+      - PYTHONIOENCODING=utf-8
+    env_file:
+      - .env.docker
     volumes:
       - hf_cache:/root/.cache/huggingface/hub
       - ./backend/chroma_db:/app/backend/chroma_db
-      - ./docker/webrtc:/app/config/webrtc:ro
     depends_on:
       - coturn
+    networks:
+      - fastrtc-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
 
+  # FastRTC Frontend
   frontend:
     build:
       context: ./frontend/react-vite
       dockerfile: Dockerfile
+      args:
+        # Build-time environment variables for Next.js
+        - NEXT_PUBLIC_API_URL=http://${EXTERNAL_IP:-localhost}:8000
+        - NEXT_PUBLIC_WEBRTC_API_URL=http://${EXTERNAL_IP:-localhost}:8000/assistant/webrtc/offer
+        - NEXT_PUBLIC_WS_URL=ws://${EXTERNAL_IP:-localhost}:8000/ws
+        - NEXT_PUBLIC_STUN_SERVERS=stun:${EXTERNAL_IP:-localhost}:3478
+        - NEXT_PUBLIC_TURN_SERVERS=turn:${EXTERNAL_IP:-localhost}:3478
     container_name: fastrtc-frontend
     restart: unless-stopped
     ports:
       - "3001:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://${EXTERNAL_IP:-localhost}:8000
-      - NEXT_PUBLIC_STUN_SERVERS=${STUN_SERVERS:-stun:${EXTERNAL_IP}:3478}
-      - NEXT_PUBLIC_TURN_SERVERS=${TURN_SERVERS:-turn:${EXTERNAL_IP}:3478}
+    env_file:
+      - .env.docker
     depends_on:
-      - backend
-
-volumes:
-  hf_cache:
-  coturn-data:
-  coturn-logs:
+      backend:
+        condition: service_healthy
+    networks:
+      - fastrtc-network

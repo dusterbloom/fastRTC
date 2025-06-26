@@ -75,7 +75,7 @@ class NetworkConfig:
     """Network and service configuration."""
     # Server settings
     default_host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
-    default_port: int = field(default_factory=lambda: int(os.getenv("PORT", "7860")))
+    default_port: int = field(default_factory=lambda: int(os.getenv("PORT", "8000")))
 
     # Service URLs
     ollama_url: str = field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://localhost:11434"))

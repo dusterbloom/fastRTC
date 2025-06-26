@@ -9,3 +9,8 @@ data/
 .pytest_cache/
 tasks/
 certs/
+
+# Docker-generated environment files
+.env.docker.generated
+backend/.env.docker.generated
+frontend/react-vite/.env.docker.generated

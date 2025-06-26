@@ -1,0 +1,334 @@
+# FastRTC - Real-Time Voice Assistant
+
+A real-time voice assistant built with WebRTC, featuring fast speech-to-text, LLM processing, and text-to-speech capabilities.
+
+## 🚀 Quick Start
+
+### One-Command Deployment
+
+FastRTC now features a unified deployment script that handles all modes with a single command:
+
+```bash
+# Local development (Python + Node, no Docker)
+./fastrtc.sh dev
+
+# Docker testing (Linux/macOS)
+./fastrtc.sh docker
+
+# Production deployment
+EXTERNAL_IP=your.server.ip ./fastrtc.sh prod
+```
+
+### Installation
+
+```bash
+git clone https://github.com/your-repo/fastRTC
+cd fastRTC
+chmod +x fastrtc.sh
+
+# Start local development
+./fastrtc.sh dev
+```
+
+## 📋 Deployment Modes
+
+### 🖥️ Development Mode (`./fastrtc.sh dev`)
+
+**Best for**: Local development and testing
+**Requirements**: Python 3.8+, Node.js 18+, Redis, Ollama/LM Studio
+
+```bash
+./fastrtc.sh dev
+```
+
+**What it does**:
+- Starts Python backend on port 8000
+- Starts React frontend on port 3000
+- Uses localhost for all services
+- Automatic dependency checking
+- Graceful shutdown with Ctrl+C
+
+**Access Points**:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Health Check: http://localhost:8000/health
+
+### 🐳 Docker Mode (`./fastrtc.sh docker`)
+
+**Best for**: Testing containerized deployment on Linux/macOS
+**Requirements**: Docker, Docker Compose
+
+```bash
+./fastrtc.sh docker
+```
+
+**What it does**:
+- Builds and starts all services in Docker
+- Includes CoTURN STUN/TURN server for WebRTC
+- Uses bridge networking (no complex host mode)
+- Health checks and service dependencies
+- Log streaming
+
+**Access Points**:
+- Frontend: http://localhost:3001
+- Backend API: http://localhost:8000
+- STUN/TURN: localhost:3478
+
+### 🚀 Production Mode (`./fastrtc.sh prod`)
+
+**Best for**: Production deployment with external IP
+**Requirements**: Docker, Docker Compose, external IP address
+
+```bash
+# Auto-detect external IP
+./fastrtc.sh prod
+
+# Or specify external IP
+EXTERNAL_IP=1.2.3.4 ./fastrtc.sh prod
+```
+
+**What it does**:
+- Auto-detects external IP for WebRTC
+- Generates secure TURN authentication
+- Configures production security settings
+- Full Docker deployment with proper networking
+
+**Access Points**:
+- Frontend: http://YOUR_IP:3001
+- Backend API: http://YOUR_IP:8000
+- STUN Server: stun:YOUR_IP:3478
+- TURN Server: turn:YOUR_IP:3478
+
+## 🔧 Configuration
+
+### Environment Files
+
+FastRTC uses a clean three-file environment strategy:
+
+```
+.env.development    # Local development settings
+.env.docker         # Docker mode settings  
+.env.production     # Production deployment settings
+```
+
+### Custom Configuration
+
+Create `.env.local` for user-specific overrides (gitignored):
+
+```bash
+# .env.local - Custom settings that override defaults
+OLLAMA_URL=http://custom-host:11434
+GEMINI_API_KEY=your-api-key
+EXTERNAL_IP=your-custom-ip
+```
+
+### Key Configuration Options
+
+#### LLM Services
+```env
+# Ollama
+OLLAMA_URL=http://localhost:11434
+OLLAMA_CONVERSATIONAL_MODEL=llama3:8b-instruct-q4_K_M
+
+# LM Studio
+LM_STUDIO_URL=http://localhost:1234/v1
+LM_STUDIO_MODEL=mistral-nemo-instruct-2407
+
+# Gemini API
+GEMINI_API_KEY=your-api-key
+```
+
+#### Speech-to-Text
+```env
+STT_BACKEND=faster                    # or 'huggingface'
+HF_MODEL_ID=openai/whisper-large-v3
+WHISPER_MODEL=base
+```
+
+#### WebRTC (Production)
+```env
+EXTERNAL_IP=auto                      # Auto-detect or specify
+TURN_AUTH_SECRET=your-secure-secret   # Generate with: openssl rand -hex 16
+```
+
+## 🎤 STT Backend Comparison
+
+### Faster-Whisper (Recommended)
+```bash
+STT_BACKEND=faster ./fastrtc.sh dev
+```
+- **Model loading**: ~3-5 seconds
+- **VRAM usage**: ~1GB  
+- **First token latency**: ~200-300ms
+- **Advantages**: Faster, lower memory, INT8 quantization
+
+### HuggingFace Transformers
+```bash
+STT_BACKEND=huggingface ./fastrtc.sh dev
+```
+- **Model loading**: ~10-15 seconds
+- **VRAM usage**: ~3GB
+- **First token latency**: ~500-800ms
+- **Advantages**: More features, direct HuggingFace integration
+
+## 🏗️ Architecture
+
+### Docker Architecture (Simplified)
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   Backend       │    │   CoTURN        │
+│   (React/Next)  │    │   (FastAPI)     │    │   (STUN/TURN)   │
+│   Port: 3001    │    │   Port: 8000    │    │   Port: 3478    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │  Docker Network │
+                    │  (Bridge Mode)  │
+                    └─────────────────┘
+```
+
+### Development Architecture
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   Backend       │    │   External      │
+│   npm run dev   │    │   Python        │    │   Services      │
+│   Port: 3000    │    │   Port: 8000    │    │   (Ollama etc.) │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                         localhost networking
+```
+
+## 🔧 Troubleshooting
+
+### Script Issues
+```bash
+# Check script permissions
+chmod +x fastrtc.sh
+
+# View help
+./fastrtc.sh help
+
+# Check dependencies
+./fastrtc.sh dev  # Will check Python, Node automatically
+./fastrtc.sh docker  # Will check Docker automatically
+```
+
+### WebRTC Connection Issues
+- Ensure external IP is correctly detected: Check script output
+- Verify ports 3478 and 49160-49200 are accessible
+- Check TURN server: `docker-compose logs fastrtc-coturn`
+
+### Development Mode Issues
+```bash
+# Backend issues
+cd backend && python start_deferred.py  # Check direct backend
+
+# Frontend issues  
+cd frontend/react-vite && npm run dev   # Check direct frontend
+
+# Check health
+curl http://localhost:8000/health
+```
+
+### Docker Mode Issues
+```bash
+# View logs
+docker-compose logs -f
+
+# Check container status
+docker-compose ps
+
+# Restart services
+docker-compose restart
+
+# Rebuild from scratch
+docker-compose down && docker-compose build --no-cache
+```
+
+### Model Loading Issues
+```bash
+# Pre-download models (optional)
+huggingface-cli download openai/whisper-large-v3
+huggingface-cli download Systran/faster-whisper-large-v3
+```
+
+## 🚫 WSL2 Notice
+
+**This version no longer supports WSL2/Windows Docker complexity.** For WSL2 users:
+
+1. **Use development mode**: `./fastrtc.sh dev` (works perfectly in WSL2)
+2. **Deploy to Linux server**: Use `./fastrtc.sh prod` on a real Linux server
+3. **Use GitHub Codespaces**: Full Docker support in cloud environment
+
+This change eliminates networking issues and provides a much better experience on native Linux/macOS.
+
+## 📁 Project Structure
+
+```
+fastRTC/
+├── fastrtc.sh            # 🌟 Universal deployment script
+├── .env.development      # Development configuration  
+├── .env.docker          # Docker configuration
+├── .env.production      # Production configuration
+├── docker-compose.yml   # Simplified Docker setup
+├── backend/             # Python FastAPI backend
+│   ├── src/
+│   ├── requirements.txt
+│   ├── start_clean.py
+│   └── start_deferred.py
+├── frontend/react-vite/ # React/Next.js frontend
+│   ├── lib/
+│   ├── components/
+│   └── package.json
+└── README.md
+```
+
+## 🚀 Performance Tips
+
+1. **Use Faster-Whisper**: `STT_BACKEND=faster` in your environment
+2. **GPU Acceleration**: Ensure CUDA is available for model inference  
+3. **Memory Management**: Monitor usage with `docker stats` or `nvidia-smi`
+4. **Resource Allocation**: Development mode uses fewer resources than Docker
+
+## 📝 Development Workflow
+
+### Recommended Workflow
+1. **Local Development**: `./fastrtc.sh dev` for fast iteration
+2. **Docker Testing**: `./fastrtc.sh docker` to test containerization
+3. **Production**: `./fastrtc.sh prod` on Linux/macOS server
+
+### Environment Progression
+```bash
+# Development
+./fastrtc.sh dev
+
+# Test containerization  
+./fastrtc.sh docker
+
+# Deploy to production
+EXTERNAL_IP=production.server.ip ./fastrtc.sh prod
+```
+
+## 🌟 What's New
+
+- **Single command deployment**: One script for all modes
+- **Simplified Docker**: No more WSL2 complexity  
+- **Clean environment management**: Three clear configuration files
+- **Linux/macOS focused**: First-class support for native platforms
+- **Raspberry Pi ready**: Standard Docker works on Pi 5
+- **Better developer experience**: Faster setup, clearer errors
+
+## 📞 Support
+
+For issues or questions:
+1. Check the troubleshooting section above
+2. View logs: `./fastrtc.sh docker` and check output
+3. Open an issue with your `fastrtc.sh` output
+
+---
+
+**Previous complex Docker scripts have been replaced with the unified `fastrtc.sh`. For legacy documentation, see git history.**

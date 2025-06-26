@@ -21,6 +21,55 @@ htmlcov/
 # Ignore documentation
 docs/
 backend/docs/
+# Bytecode, caches, and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+*.egg
+
+# Test and coverage artifacts
+.coverage
+htmlcov/
+coverage.xml
+tests/
+*.log
+
+# Data, models, and local databases
+chroma_db/
+models/
+data/
+logs/
+*.sqlite3
+*.db
+
+# Environment and config files (do not copy secrets)
+.env
+.env.*
+!.env.example
+
+# Git and CI/CD
+.git/
+.github/
+.gitignore
+
+# Archives and backups
+archive/
+*.bak
+*.tar
+*.tar.gz
+*.zip
+
+# Documentation (optional, unless needed in image)
+docs/
+backend/venv/
+backend/docs/
+
 
 # Ignore local data and models not needed in build
 chroma_db/

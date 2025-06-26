@@ -39,7 +39,7 @@ from src.utils.process_killer import force_kill_after_timeout, setup_signal_hand
 setup_logging("DEBUG")  # Set up logging with DEBUG level
 logger = get_logger(__name__)
 setup_signal_handlers()  # Set up Ctrl+C and kill signal handlers
-logger.critical("🚨 TOP LEVEL LOGGER TEST IN START_CLEAN.PY 🚨") # New test log
+logger.debug("🚨 TOP LEVEL LOGGER TEST IN START_CLEAN.PY 🚨") # New test log
 
 # Global components
 voice_assistant: Optional[VoiceAssistant] = None

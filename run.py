@@ -23,5 +23,5 @@ print("Server will be available at: http://localhost:8000")
 print("=" * 60)
 
 # Run start_clean.py
-start_script = Path(__file__).parent / "backend" / "start_clean.py"
+start_script = Path(__file__).parent / "backend" / "start_deferred.py"
 subprocess.run([sys.executable, str(start_script)])

@@ -107,10 +107,17 @@ class StreamCallbackHandler:
         Yields:
             Tuples of (audio_data, additional_outputs) for streaming back to client
        """
-        # (Removed verbose debug prints for cleaner terminal output)
+        # DEBUG: Log every callback invocation with enhanced details
+        current_time = time.time()
+        print(f"🎤 CALLBACK INVOKED [{current_time:.3f}]: Received audio data: {type(audio_data_tuple)}")
         try:
             sample_rate, audio_array = audio_data_tuple
+            audio_duration = len(audio_array) / sample_rate if sample_rate > 0 else 0
+            audio_rms = np.sqrt(np.mean(audio_array**2)) if hasattr(audio_array, 'shape') and audio_array.size > 0 else 0
+            print(f"🎤 CALLBACK: Sample rate: {sample_rate}Hz, Audio shape: {audio_array.shape if hasattr(audio_array, 'shape') else type(audio_array)}")
+            print(f"🎤 CALLBACK: Duration: {audio_duration:.3f}s, RMS: {audio_rms:.6f}, Peak: {np.max(np.abs(audio_array)) if hasattr(audio_array, 'shape') and audio_array.size > 0 else 0:.6f}")
         except Exception as e:
+            print(f"🎤 CALLBACK ERROR: Failed to parse audio data: {e}")
             pass
         if not self.voice_assistant:
             logger.warning("🎤 process_audio_stream: Voice assistant not initialized. Yielding empty.")
@@ -250,9 +257,10 @@ class StreamCallbackHandler:
 
         # outputs is now a TranscriptionResult object
         current_text = transcription_result.text.strip() if transcription_result and hasattr(transcription_result, 'text') else ""
-        print(f"[STT DEBUG] Transcription result: {transcription_result}")
-        print(f"[STT DEBUG] Has text attribute: {hasattr(transcription_result, 'text') if transcription_result else False}")
-        print(f"[STT DEBUG] Raw text: '{transcription_result.text if transcription_result and hasattr(transcription_result, 'text') else 'NO TEXT'}'")
+        print(f"🗣️  [STT DEBUG] Transcription result: {transcription_result}")
+        print(f"🗣️  [STT DEBUG] Has text attribute: {hasattr(transcription_result, 'text') if transcription_result else False}")
+        print(f"🗣️  [STT DEBUG] Raw text: '{transcription_result.text if transcription_result and hasattr(transcription_result, 'text') else 'NO TEXT'}'")
+        print(f"🗣️  [STT DEBUG] Current text (stripped): '{current_text}' (length: {len(current_text)})")
         
         # Thread-safe buffer management
         with self.buffer_lock:

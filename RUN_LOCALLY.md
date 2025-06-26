@@ -1,3 +1,67 @@
+🐳 Docker (Cross-Platform)
+
+For containerized deployment:
+# Windows
+./start-docker.bat
+
+# macOS/Linux
+./start-docker.sh
+These scripts auto-detect your platform and generate the right
+environment files.
+
+💻 Local Development
+
+For local development without Docker:
+
+Backend (Python)
+
+cd backend
+# Uses backend/.env.development or backend/.env.example
+python start_deferred.py
+# or
+python start_clean.py
+
+Frontend (Next.js)
+
+cd frontend/react-vite
+# Uses .env.development for local dev
+npm run dev
+
+📁 Environment File Strategy
+
+The repo now supports multiple development modes:
+
+Backend Environment Files:
+
+- backend/.env.example - Template with defaults
+- backend/.env.development - Local development
+- backend/.env - Auto-generated for Docker
+
+Frontend Environment Files:
+
+- frontend/react-vite/.env - Base development config
+- frontend/react-vite/.env.development - Local development
+- frontend/react-vite/.env.production - Docker/production
+- frontend/react-vite/.env.local - Auto-generated for Docker
+(gitignored)
+
+🔄 Workflow Recommendations:
+
+1. Local Development: Use existing .env.development files
+2. Docker Testing: Run the platform scripts which generate
+Docker-specific .env files
+3. Production: Use .env.production files
+
+The key difference is that Docker scripts generate files with
+host.docker.internal for networking, while local development uses
+localhost.
+
+
+
+# OLD MATERIAL BELOW
+
+
+
 # Running Faster-Whisper Locally (Without Docker)
 
 You can run and compare both STT backends locally without Docker!

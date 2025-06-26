@@ -51,28 +51,68 @@ export class WebRTCClient {
 
     async connect() {
         try {
+            // Configure ICE servers
+            const iceServers = [];
+            
+            // Add STUN servers (testing without TURN for now)
+            if (process.env.NEXT_PUBLIC_STUN_SERVERS) {
+                iceServers.push({ urls: process.env.NEXT_PUBLIC_STUN_SERVERS });
+            }
+            // Add fallback STUN server
+            iceServers.push({ urls: 'stun:stun.l.google.com:19302' });
+            
+            // TODO: Re-enable TURN servers once properly configured
+            // if (process.env.NEXT_PUBLIC_TURN_SERVERS) {
+            //     iceServers.push({
+            //         urls: process.env.NEXT_PUBLIC_TURN_SERVERS,
+            //         username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+            //         credential: process.env.NEXT_PUBLIC_TURN_PASSWORD
+            //     });
+            // }
+            
+            console.log('ICE servers configured:', iceServers);
+            
             this.peerConnection = new RTCPeerConnection({
-                iceServers: [
-                    { urls: process.env.NEXT_PUBLIC_STUN_SERVERS?.split(',') || [] },
-                    {
-                        urls: process.env.NEXT_PUBLIC_TURN_SERVERS?.split(',') || [],
-                        username: process.env.NEXT_PUBLIC_TURN_USERNAME,
-                        credential: process.env.NEXT_PUBLIC_TURN_PASSWORD
-                    }
-                ]
+                iceServers: iceServers
             });
             
             // Get user media with specific device if specified
             try {
                 const constraints: MediaStreamConstraints = {
                     audio: this.currentInputDeviceId 
-                        ? { deviceId: { exact: this.currentInputDeviceId } } 
-                        : true
+                        ? { 
+                            deviceId: { exact: this.currentInputDeviceId },
+                            sampleRate: { ideal: 16000 },
+                            sampleSize: { ideal: 16 },
+                            channelCount: { exact: 1 },
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        } 
+                        : {
+                            sampleRate: { ideal: 16000 },
+                            sampleSize: { ideal: 16 },
+                            channelCount: { exact: 1 },
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
                 };
                 
                 this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log('🎤 Successfully got user media:', this.mediaStream);
+                console.log('🎤 Audio tracks:', this.mediaStream.getAudioTracks());
+                this.mediaStream.getAudioTracks().forEach((track, index) => {
+                    console.log(`🎤 Audio track ${index}:`, {
+                        kind: track.kind,
+                        label: track.label,
+                        enabled: track.enabled,
+                        readyState: track.readyState,
+                        settings: track.getSettings()
+                    });
+                });
             } catch (mediaError: any) {
-                console.error('Media error:', mediaError);
+                console.error('🚨 Media error:', mediaError);
                 if (mediaError.name === 'NotAllowedError') {
                     throw new Error('Microphone access denied. Please allow microphone access and try again.');
                 } else if (mediaError.name === 'NotFoundError') {
@@ -85,14 +125,27 @@ export class WebRTCClient {
             this.setupAudioAnalysis();
             
             this.mediaStream.getTracks().forEach(track => {
+                console.log('🎵 Adding track to peer connection:', {
+                    kind: track.kind,
+                    label: track.label,
+                    enabled: track.enabled,
+                    readyState: track.readyState
+                });
                 if (this.peerConnection) {
                     this.peerConnection.addTrack(track, this.mediaStream!);
+                    console.log('🎵 Track added successfully to peer connection');
                 }
             });
             
             this.peerConnection.addEventListener('track', (event) => {
+                console.log('🎵 WebRTC track event received:', event);
+                console.log('🎵 Track kind:', event.track.kind);
+                console.log('🎵 Track readyState:', event.track.readyState);
+                console.log('🎵 Streams:', event.streams);
+                
                 if (this.options.onAudioStream) {
                     const stream = event.streams[0];
+                    console.log('🎵 Calling onAudioStream with stream:', stream);
                     
                     // If we have an audio output device specified and the browser supports setSinkId
                     if (this.currentOutputDeviceId && 'setSinkId' in HTMLAudioElement.prototype) {
@@ -120,8 +173,10 @@ export class WebRTCClient {
             });
             
             // Create and send offer
+            console.log('🤝 Creating WebRTC offer...');
             const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
+            console.log('🤝 Local description set, sending offer to backend...');
             
             // Use same-origin request to avoid CORS preflight
             const response = await fetch(process.env.NEXT_PUBLIC_WEBRTC_API_URL || 'http://localhost:8000/assistant/webrtc/offer', {
@@ -139,8 +194,11 @@ export class WebRTCClient {
                 })
             });
             
+            console.log('🤝 Backend response status:', response.status);
             const serverResponse = await response.json();
+            console.log('🤝 Backend response data:', serverResponse);
             await this.peerConnection.setRemoteDescription(serverResponse);
+            console.log('🤝 Remote description set, WebRTC connection established');
             
             if (this.options.onConnected) {
                 this.options.onConnected();

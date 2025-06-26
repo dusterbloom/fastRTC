@@ -51,24 +51,28 @@ class FastRTCBridge:
             Configured FastRTC Stream instance
         """
         logger.info("🌐 Creating FastRTC stream with optimized audio settings...")
+        logger.debug(f"🌐 Callback function: {callback_function}")
+        logger.debug(f"🌐 Speech threshold: {speech_threshold}")
+        logger.debug(f"🌐 Server: {server_name}:{server_port}")
         
         try:
             # Create stream with ReplyOnPause for voice activity detection
+            logger.debug("🌐 Creating ReplyOnPause with callback...")
             self.stream = Stream(
                 ReplyOnPause(
                     callback_function,
                     can_interrupt=True,
                     algo_options=AlgoOptions(
                         # This is the GATEKEEPER. We are making it extremely sensitive.
-                        speech_threshold=0.5,  # Drastically lower: will detect even quiet speech.
-                        started_talking_threshold=0.10,
-                        audio_chunk_duration=1.5 # Process audio in smaller chunks for responsiveness
+                        speech_threshold=0.2,  # Much more sensitive: will detect even quiet speech
+                        started_talking_threshold=0.05,  # Even more sensitive for speech start detection
+                        audio_chunk_duration=1.0 # Smaller chunks for faster response
                     ),
                     model_options=SileroVadOptions(
                         # This is the TIMER. Updated for faster interruption support.
-                        threshold=0.2,                  # More sensitive model threshold
-                        min_speech_duration_ms=350,     # Catches very short words like "a" or "I"
-                        min_silence_duration_ms=3000,   # FASTER: Reduced from 4000ms to 1200ms for quicker interruption
+                        threshold=0.15,                 # More sensitive model threshold for better detection
+                        min_speech_duration_ms=250,     # Reduced to catch shorter utterances
+                        min_silence_duration_ms=1200,   # MUCH FASTER: Reduced from 3000ms to 1200ms for quicker response
                         speech_pad_ms=250              # Generous buffer at the end of your speech
                     )
                 ),
@@ -80,6 +84,8 @@ class FastRTCBridge:
 
             
             logger.info("✅ FastRTC stream created successfully")
+            logger.debug(f"✅ Stream object: {self.stream}")
+            logger.debug(f"✅ Stream modality: {self.stream.modality if hasattr(self.stream, 'modality') else 'unknown'}")
             return self.stream
             
         except Exception as e:
