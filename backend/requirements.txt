@@ -1,44 +1,44 @@
-# Core FastRTC dependencies
-fastrtc[vad,stt,tts,stopword]
-requests
-soundfile
-chromadb>=0.4.22
-rank_bm25>=0.2.2
-librosa==0.11.0
-# scipy>=1.10.0
-scipy==1.13.0
-soxr==0.5.0.post1
+## Run first pip install -r requirements.txt
+## Then run pip install --no-deps fastrtc==0.0.28
+
+numpy==1.26.4  # numpy<2.0 for compatibility with transformers and other libraries
+torch==2.1.1
+kokoro-onnx==0.4.9
+# Other top-level packages your app uses directly
 fastapi
 uvicorn[standard]
+librosa
+scipy
+gradio
 
+requests
+soundfile
+chromadb
+rank_bm25
+librosa
+soxr
 
 # LLM dependencies for A-MEM
 nltk
-torch>=2.1.1
-
 
 # HTTP and async
 aiohttp
-transformers>=4.36.2
-numpy<2.0,>=1.23.5  # numpy<2.0 for compatibility with transformers and other libraries
+aioice>=0.10.1
+aiortc
+transformers
 
 # Faster-whisper dependencies (CTranslate2 backend)
-faster-whisper>=1.1           # CTranslate2 backend, streaming API
-ctranslate2>=4.2.0            # INT8/FP16 kernels, FlashAttn optional
-huggingface_hub[hf_transfer]>=0.25  # Rust downloader for model layer
+faster-whisper           # CTranslate2 backend, streaming API
+ctranslate2            # INT8/FP16 kernels, FlashAttn optional
+huggingface_hub[hf_transfer]  # Rust downloader for model layer
 
 # Development and testing
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
+pytest
+pytest-asyncio
 
 
 # Ollama dependencies
-ollama>=0.1.0
+ollama
 
 # Redis dependencies
-redis>=4.5.0
-
-# Voice Recognition disabled - dependencies removed for faster startup
-
-# Optional dependencies
-# Uncomment the following lines to install optional dependencies
+redis

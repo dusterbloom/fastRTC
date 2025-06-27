@@ -31,41 +31,20 @@ class SpokenUserIdentifier:
         self.users_file = Path(users_file)
         self.users_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # Default activation phrases in multiple languages
+        # Default activation phrases - ONLY explicit login commands
         if activation_phrases is None:
             self.activation_phrases = [
-                # English - Core patterns
-                r"(?:^|\s)i am (\w+)(?:\s*$|[.!?])",
-                r"i'm (\w+)",
-                r"my (?:name|id) is (\w+)",
-                r"this is (\w+)",
-                r"user (\w+)",
-                r"it's (\w+)",
-                # English - Natural variations  
-                r"(?:hi|hello|hey),?\s*i'?m (\w+)",
-                r"(?:hi|hello|hey),?\s*i am (\w+)",
-                r"(?:hi|hello|hey),?\s*this is (\w+)",
-                # Spanish
-                r"soy (\w+)",
-                r"mi nombre es (\w+)",
-                # French
-                r"je suis (\w+)",
-                r"mon nom est (\w+)",
-                # German
-                r"ich bin (\w+)",
-                r"mein name ist (\w+)",
-                # Portuguese
-                r"eu sou (\w+)",
-                r"meu nome é (\w+)",
-                # Italian
-                r"sono (\w+)",
-                r"il mio nome è (\w+)",
-                # Japanese (romanized)
-                r"watashi wa (\w+)",
-                # Simple patterns
-                r"login (\w+)",
-                r"switch to (\w+)",
-                r"change to (\w+)"
+                # Explicit login commands only
+                r"login (?:as )?(?:user )?(\w+)",
+                r"log in (?:as )?(?:user )?(\w+)",
+                r"switch (?:to )?(?:user )?(\w+)",
+                r"change (?:to )?(?:user )?(\w+)",
+                r"user login (\w+)",
+                r"identify (?:as )?(?:user )?(\w+)",
+                # Echo login as requested
+                r"echo login (\w+)",
+                # Additional explicit patterns
+                r"switch user (\w+)"
             ]
         else:
             self.activation_phrases = activation_phrases
@@ -143,11 +122,29 @@ class SpokenUserIdentifier:
             
         text = text.lower().strip()
         
+        # Blacklist common words that should never be usernames
+        blacklisted_words = {
+            'quite', 'fantastic', 'interesting', 'good', 'bad', 'nice', 'great', 
+            'amazing', 'wonderful', 'terrible', 'awful', 'okay', 'fine', 'cool',
+            'hot', 'cold', 'big', 'small', 'fast', 'slow', 'new', 'old', 'young',
+            'happy', 'sad', 'angry', 'excited', 'tired', 'hungry', 'thirsty',
+            'ready', 'done', 'finished', 'started', 'working', 'broken', 'fixed'
+        }
+        
         # Try each activation phrase pattern
         for pattern in self.activation_phrases:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 username = match.group(1).lower().strip()
+                
+                # Validate username - reject blacklisted words and too short names
+                if username in blacklisted_words:
+                    logger.debug(f"🚫 Rejected blacklisted username: '{username}' from text: '{text}'")
+                    continue
+                    
+                if len(username) < 2:
+                    logger.debug(f"🚫 Rejected too short username: '{username}' from text: '{text}'")
+                    continue
                 
                 # Auto-register new users or verify existing ones
                 if username not in self.users:
