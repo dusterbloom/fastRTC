@@ -385,7 +385,7 @@ run_development() {
     
     # Debug: Show environment variable values
     log_info "Debug: USE_THREADING_PIPELINE=${USE_THREADING_PIPELINE:-false}"
-    log_info "Debug: THREADING_FALLBACK_TO_ASYNC=${THREADING_FALLBACK_TO_ASYNC:-true}"
+    log_info "Debug: THREADING_FALLBACK_TO_ASYNC=${THREADING_FALLBACK_TO_ASYNC:-false}"
     
     log_info "Starting backend with: $cmd"
     $cmd &

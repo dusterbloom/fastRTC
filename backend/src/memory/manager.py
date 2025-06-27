@@ -143,6 +143,14 @@ class AMemMemoryManager(MemoryManager):
                 'last_updated': None
             }
             
+            # Clear any cached context for the new user
+            if hasattr(self, 'redis_cache') and self.redis_cache:
+                try:
+                    self.redis_cache.invalidate_user_context(new_user_id)
+                    logger.debug(f"🗑️ Cleared cached context for user: {new_user_id}")
+                except Exception as e:
+                    logger.debug(f"⚠️ Could not clear cached context: {e}")
+            
             # Mark as loaded for the new user
             self._memories_loaded = True
             

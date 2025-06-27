@@ -149,26 +149,89 @@ class StreamingPipeline:
             if os.getenv("DEBUG_STREAMING", "false").lower() == "true":
                 logger.debug(f"🧠 Step 4: Starting LLM streaming for: '{user_text}'")
             
-            # Check for user identification first
-            logger.debug(f"🔍 [STREAMING] Checking user identification for text: '{user_text[:100]}...'")
-            identified_user_id = self.voice_assistant.voice_print_manager.process_text(user_text)
-            logger.debug(f"🔍 [STREAMING] Identification result: {identified_user_id} (current user: {self.voice_assistant.user_id})")
+            # Check for authentication/user identification
+            logger.info(f"🔍 [STREAMING] Starting authentication check for text: '{user_text[:100]}...'")
             
-            if identified_user_id and identified_user_id != self.voice_assistant.user_id:
-                logger.info(f"🔄 [STREAMING] User identification detected: switching from '{self.voice_assistant.user_id}' to '{identified_user_id}'")
+            try:
+                auth_result = self.voice_assistant.voice_print_manager.process_text(user_text)
+                logger.info(f"🔍 [STREAMING] Authentication result: {auth_result}")
+            except Exception as auth_error:
+                logger.error(f"❌ [STREAMING] Authentication error: {auth_error}")
+                import traceback
+                logger.error(f"❌ [STREAMING] Auth traceback: {traceback.format_exc()}")
+                auth_result = None
+            
+            if auth_result:
+                action = auth_result.get('action')
+                confirmation_message = None
                 
-                # Update user ID
-                self.voice_assistant.user_id = identified_user_id
-                self.voice_assistant.user_identified = True
-                self.voice_assistant.identified_name = identified_user_id.replace("user_", "")
+                if action == 'user_identified':
+                    # Successful login
+                    identified_user_id = auth_result['user_id']
+                    if identified_user_id != self.voice_assistant.user_id:
+                        logger.info(f"🔄 [STREAMING] User authenticated: switching from '{self.voice_assistant.user_id}' to '{identified_user_id}'")
+                        
+                        # Extract username for display
+                        username = identified_user_id.replace("user_", "")
+                        
+                        # Switch memory manager to new user
+                        if self.voice_assistant.memory_manager.switch_user(identified_user_id):
+                            logger.info(f"✅ [STREAMING] Memory manager switched to user: {identified_user_id}")
+                            
+                            # Refresh session with new authenticated user
+                            self.voice_assistant.refresh_session_after_auth(identified_user_id, username)
+                            
+                            confirmation_message = f"Welcome back, {username}! I've loaded your personal memory profile and started a fresh session."
+                        else:
+                            logger.error(f"❌ [STREAMING] Failed to switch memory manager to user: {identified_user_id}")
+                            confirmation_message = "I recognized you, but there was an issue accessing your personal profile."
                 
-                # Switch memory manager to new user
-                if self.voice_assistant.memory_manager.switch_user(identified_user_id):
-                    logger.info(f"✅ [STREAMING] Memory manager switched to user: {identified_user_id}")
-                    # Return confirmation message for user identification
-                    confirmation_message = f"Hello {self.voice_assistant.identified_name}! I've switched to your personal memory profile."
+                elif action == 'pin_request':
+                    # User exists, need PIN
+                    username = auth_result['username']
+                    confirmation_message = f"Hello {username}! Please provide your 4-digit PIN to access your profile."
                     
-                    # Stream the confirmation message immediately
+                elif action == 'registration_success':
+                    # New user registered and logged in
+                    identified_user_id = auth_result['user_id']
+                    username = identified_user_id.replace("user_", "")
+                    
+                    if self.voice_assistant.memory_manager.switch_user(identified_user_id):
+                        logger.info(f"✅ [STREAMING] New user registered: {identified_user_id}")
+                        
+                        # Refresh session with new registered user
+                        self.voice_assistant.refresh_session_after_auth(identified_user_id, username)
+                        
+                        confirmation_message = f"Welcome {username}! Your account has been created and I'll remember our conversations in your new session."
+                    else:
+                        logger.error(f"❌ [STREAMING] Failed to switch memory manager for new user: {identified_user_id}")
+                        confirmation_message = "Your account was created, but there was an issue setting up your memory profile."
+                
+                elif action == 'login_cancelled':
+                    # User cancelled login
+                    username = auth_result.get('username', 'someone')
+                    confirmation_message = f"No problem, {username}. I'll continue with the temporary session."
+                
+                elif action == 'suggest_registration':
+                    # User identified but not registered
+                    username = auth_result.get('username', 'unknown')
+                    confirmation_message = auth_result.get('message', f"I don't know you yet, {username}. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN.")
+                
+                elif action == 'auth_failed':
+                    # Authentication failed
+                    reason = auth_result.get('reason', 'unknown')
+                    if reason == 'invalid_pin':
+                        confirmation_message = "Sorry, that PIN is incorrect. Please try again or say 'cancel' to stop."
+                    elif reason == 'user_not_found':
+                        username = auth_result.get('username', 'unknown')
+                        confirmation_message = f"I don't have a user named '{username}'. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN."
+                    elif reason == 'invalid_username':
+                        confirmation_message = "That username isn't valid. Please choose a different name."
+                    else:
+                        confirmation_message = "Authentication failed. Please try again."
+                
+                # Stream the confirmation message if we have one
+                if confirmation_message:
                     current_language = self.voice_assistant.current_language
                     available_voices = self.voice_mapper.get_voices_for_language(current_language)
                     voice_id = available_voices[0] if available_voices else None
@@ -179,9 +242,6 @@ class StreamingPipeline:
                         if isinstance(audio_chunk, np.ndarray) and audio_chunk.size > 0:
                             yield (sample_rate, audio_chunk), AdditionalOutputs()
                     return
-                else:
-                    logger.error(f"❌ [STREAMING] Failed to switch memory manager to user: {identified_user_id}")
-                    # Continue with normal processing but log the error
             
             # Get streaming LLM response
             async for token in self.voice_assistant.llm_service.stream_response(user_text):
@@ -222,9 +282,11 @@ class StreamingPipeline:
             logger.debug(f"⏱️ LLM to TTS Pipeline: {total_time:.3f}s")
                     
         except Exception as e:
+            import traceback
             logger.error(f"❌ LLM→TTS streaming error: {e}")
+            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
             # Fallback error message
-            async for audio_chunk in self._stream_sentence_to_tts("Sorry, I encountered an error."):
+            async for audio_chunk in self._stream_sentence_to_tts("I encountered an error processing your request."):
                 yield audio_chunk
     
     def _is_sentence_complete(self, text: str) -> bool:

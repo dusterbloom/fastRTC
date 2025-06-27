@@ -301,21 +301,29 @@ class VoiceAssistant:
         
         # Check for user identification first
         logger.debug(f"🔍 Checking user identification for text: '{user_text[:100]}...'")
-        identified_user_id = self.voice_print_manager.process_text(user_text)
-        logger.debug(f"🔍 Identification result: {identified_user_id} (current user: {self.user_id})")
+        auth_result = self.voice_print_manager.process_text(user_text)
+        logger.debug(f"🔍 Authentication result: {auth_result} (current user: {self.user_id})")
+        
+        # Handle new authentication result format
+        identified_user_id = None
+        if auth_result and auth_result.get('action') == 'user_identified':
+            identified_user_id = auth_result.get('user_id')
+        
         if identified_user_id and identified_user_id != self.user_id:
             logger.info(f"🔄 User identification detected: switching from '{self.user_id}' to '{identified_user_id}'")
             
-            # Update user ID
-            self.user_id = identified_user_id
-            self.user_identified = True
-            self.identified_name = identified_user_id.replace("user_", "")
+            # Extract username for display
+            username = identified_user_id.replace("user_", "")
             
-            # Switch memory manager to new user
+            # Switch memory manager to new user first
             if self.memory_manager.switch_user(identified_user_id):
                 logger.info(f"✅ Memory manager switched to user: {identified_user_id}")
+                
+                # Refresh session with new authenticated user
+                self.refresh_session_after_auth(identified_user_id, username)
+                
                 # Return a confirmation message for user identification
-                return f"Hello {self.identified_name}! I've switched to your personal memory profile."
+                return f"Hello {username}! I've switched to your personal memory profile and started a fresh session."
             else:
                 logger.error(f"❌ Failed to switch memory manager to user: {identified_user_id}")
                 return "I recognized you, but there was an issue accessing your personal profile. Let me try to help anyway."
@@ -345,7 +353,10 @@ class VoiceAssistant:
         if turns:
             session_turns_text = "\n".join([f"User: {turn.user}\nAssistant: {turn.assistant}" for turn in turns[-3:]]) # Assuming turn is ConversationTurn object
             if session_turns_text:
-                session_context = f"\n\nRecent exchanges in this session:\n{session_turns_text}"
+                session_context = f"""
+
+Recent exchanges in this session:
+{session_turns_text}"""
             logger.debug(f"Session Context for LLM: {session_context}")
 
         # Combine contexts (A-MEM context should ideally be part of the system prompt in LLMService,
@@ -744,6 +755,41 @@ class VoiceAssistant:
         
         logger.info(f"✅ Session reset complete. New session: {self.session_id}")
     
+    def refresh_session_after_auth(self, new_user_id: str, username: str = None):
+        """Generate new session ID and refresh context after authentication.
+        
+        Args:
+            new_user_id: New authenticated user ID (e.g., 'user_alice')
+            username: Display name for the user (e.g., 'alice')
+        """
+        logger.info(f"🔄 Refreshing session after authentication: {self.user_id} -> {new_user_id}")
+        
+        # Generate new session timestamp
+        new_timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        old_session_id = self.session_id
+        
+        # Update session and user info
+        self.session_id = f"session_{new_timestamp}"
+        self.user_id = new_user_id
+        self.user_identified = True
+        self.identified_name = username or new_user_id.replace("user_", "")
+        
+        # Clear conversation buffer for fresh authenticated session
+        self.conversation_buffer.clear()
+        
+        # Reset counters for new session
+        self.turn_count = 0
+        self.voice_detection_successes = 0
+        
+        # Clear response cache to avoid cross-user contamination
+        if hasattr(self.response_cache, 'clear'):
+            self.response_cache.clear()
+        elif hasattr(self.response_cache, '_cache'):
+            self.response_cache._cache.clear()
+        
+        logger.info(f"✅ Session refreshed: {old_session_id} -> {self.session_id}")
+        logger.info(f"✅ User authenticated: {self.identified_name} ({new_user_id})")
+    
     async def identify_user(self, name: str) -> bool:
         """
         Identify user and switch to their dedicated memory context.
@@ -844,8 +890,9 @@ class VoiceAssistant:
             True if user was identified from the text
         """
         # First try the SpokenUserIdentifier
-        identified_user_id = self.voice_print_manager.process_text(user_text)
-        if identified_user_id:
+        auth_result = self.voice_print_manager.process_text(user_text)
+        if auth_result and auth_result.get('action') == 'user_identified':
+            identified_user_id = auth_result.get('user_id')
             # identified_user_id is now in format "user_alice" - switch to this user
             if identified_user_id != self.user_id:
                 logger.info(f"👤 User identified via SpokenUserIdentifier: {identified_user_id}")
@@ -987,7 +1034,10 @@ class VoiceAssistant:
         try:
             # Register user with SpokenUserIdentifier
             clean_name = self._normalize_username(name)
-            if clean_name and self.voice_print_manager.register_user(clean_name, name):
+            # Note: This old registration method is deprecated. Users should use the new PIN-based registration.
+            # For backward compatibility, we'll generate a temporary PIN
+            temp_pin = "0000"  # Temporary PIN for legacy registrations
+            if clean_name and self.voice_print_manager.register_user(clean_name, temp_pin, name):
                 # Create task to switch to new user immediately
                 import asyncio
                 try:
