@@ -103,6 +103,9 @@ class StreamCallbackHandler:
         Yields:
             Tuples of (audio_data, additional_outputs) for streaming back to client
        """
+        # Interrupt ongoing TTS when user starts speaking
+        self.tts_engine.interrupt()
+        
         # DEBUG: Log every callback invocation with enhanced details
         current_time = time.time()
         logger.debug(f"🎤 CALLBACK INVOKED [{current_time:.3f}]: Received audio data: {type(audio_data_tuple)}")
@@ -504,6 +507,9 @@ class StreamCallbackHandler:
         Yields:
             Audio chunks for streaming back to client
         """
+        # Reset interruption flag before starting new TTS synthesis
+        self.tts_engine.reset_interrupt()
+        
         additional_outputs = AdditionalOutputs()
 
         # --- FIX: Always use Kokoro language code for voice selection and TTS options ---

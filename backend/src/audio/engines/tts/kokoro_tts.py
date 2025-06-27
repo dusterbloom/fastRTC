@@ -42,6 +42,7 @@ class KokoroTTSEngine(BaseTTSEngine):
         super().__init__()
         
         self.tts_model = None
+        self.should_interrupt = False  # Flag for interrupting TTS synthesis
         self._initialize_model()
     
     def _initialize_model(self) -> None:
@@ -171,6 +172,11 @@ class KokoroTTSEngine(BaseTTSEngine):
         
         try:
             for tts_output_item in self.tts_model.stream_tts_sync(text, options):
+                # Check for interruption before processing each chunk
+                if self.should_interrupt:
+                    logger.info("🛑 TTS synthesis interrupted")
+                    break
+                    
                 if isinstance(tts_output_item, tuple) and len(tts_output_item) == 2:
                     sample_rate, audio_array = tts_output_item
                     if isinstance(audio_array, np.ndarray) and audio_array.size > 0:
@@ -283,6 +289,11 @@ class KokoroTTSEngine(BaseTTSEngine):
             total_samples = 0
             
             for tts_output_item in self.tts_model.stream_tts_sync(text, tts_options):
+                # Check for interruption before processing each chunk
+                if self.should_interrupt:
+                    logger.info("🛑 TTS streaming synthesis interrupted")
+                    break
+                    
                 if isinstance(tts_output_item, tuple) and len(tts_output_item) == 2:
                     sample_rate, audio_array = tts_output_item
                     if isinstance(audio_array, np.ndarray) and audio_array.size > 0:
@@ -292,6 +303,10 @@ class KokoroTTSEngine(BaseTTSEngine):
                         # Yield optimized chunks to prevent timeouts and audio artifacts
                         chunk_size = min(2048, audio_array.size)  # Increased from 1024 to 2048
                         for i in range(0, audio_array.size, chunk_size):
+                            # Check for interruption before yielding each mini-chunk
+                            if self.should_interrupt:
+                                logger.info("🛑 TTS streaming synthesis interrupted during mini-chunk")
+                                return
                             mini_chunk = audio_array[i:i+chunk_size]
                             if mini_chunk.size > 0:
                                 yield (sample_rate, mini_chunk.astype(np.float32))
@@ -303,6 +318,10 @@ class KokoroTTSEngine(BaseTTSEngine):
                     
                     chunk_size = min(2048, tts_output_item.size)  # Increased from 1024 to 2048
                     for i in range(0, tts_output_item.size, chunk_size):
+                        # Check for interruption before yielding each mini-chunk
+                        if self.should_interrupt:
+                            logger.info("🛑 TTS streaming synthesis interrupted during mini-chunk")
+                            return
                         mini_chunk = tts_output_item[i:i+chunk_size]
                         if mini_chunk.size > 0:
                             yield (sample_rate, mini_chunk.astype(np.float32))
@@ -377,6 +396,11 @@ class KokoroTTSEngine(BaseTTSEngine):
                 chunks = []
                 
                 for tts_output_item in self.tts_model.stream_tts_sync(text, tts_options):
+                    # Check for interruption before processing each chunk
+                    if self.should_interrupt:
+                        logger.info("🛑 TTS async streaming synthesis interrupted")
+                        break
+                        
                     if isinstance(tts_output_item, tuple) and len(tts_output_item) == 2:
                         sample_rate, audio_array = tts_output_item
                         if isinstance(audio_array, np.ndarray) and audio_array.size > 0:
@@ -386,6 +410,10 @@ class KokoroTTSEngine(BaseTTSEngine):
                             # Split into optimized chunks for smooth streaming without artifacts
                             chunk_size = min(1536, audio_array.size)  # Increased from 512 to 1536 for better audio quality
                             for i in range(0, audio_array.size, chunk_size):
+                                # Check for interruption before processing each mini-chunk
+                                if self.should_interrupt:
+                                    logger.info("🛑 TTS async streaming synthesis interrupted during mini-chunk")
+                                    break
                                 mini_chunk = audio_array[i:i+chunk_size]
                                 if mini_chunk.size > 0:
                                     chunks.append((sample_rate, mini_chunk.astype(np.float32)))
@@ -397,6 +425,10 @@ class KokoroTTSEngine(BaseTTSEngine):
                         
                         chunk_size = min(1536, tts_output_item.size)  # Increased from 512 to 1536 for better audio quality
                         for i in range(0, tts_output_item.size, chunk_size):
+                            # Check for interruption before processing each mini-chunk
+                            if self.should_interrupt:
+                                logger.info("🛑 TTS async streaming synthesis interrupted during mini-chunk")
+                                break
                             mini_chunk = tts_output_item[i:i+chunk_size]
                             if mini_chunk.size > 0:
                                 chunks.append((sample_rate, mini_chunk.astype(np.float32)))
@@ -409,6 +441,10 @@ class KokoroTTSEngine(BaseTTSEngine):
             
             # Yield chunks asynchronously
             for sample_rate, audio_chunk in chunks:
+                # Check for interruption before yielding each chunk
+                if self.should_interrupt:
+                    logger.info("🛑 TTS async synthesis interrupted during yielding")
+                    break
                 yield (sample_rate, audio_chunk)
                 # Small yield to allow other coroutines to run
                 await asyncio.sleep(0)
@@ -450,3 +486,12 @@ class KokoroTTSEngine(BaseTTSEngine):
             bool: True if engine is ready, False otherwise
         """
         return super().is_available() and self.tts_model is not None
+    
+    def interrupt(self) -> None:
+        """Interrupt ongoing TTS synthesis."""
+        self.should_interrupt = True
+        logger.info("🛑 TTS interruption requested")
+    
+    def reset_interrupt(self) -> None:
+        """Reset the interruption flag for new synthesis."""
+        self.should_interrupt = False
