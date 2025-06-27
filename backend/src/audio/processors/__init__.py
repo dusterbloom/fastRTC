@@ -4,10 +4,10 @@ This module provides audio processing capabilities including
 Bluetooth audio processing, noise reduction, and audio healing.
 """
 
-from .bluetooth_processor import BluetoothAudioProcessor
+# from .bluetooth_processor import BluetoothAudioProcessor  # Disabled due to scipy compatibility
 from .base import BaseAudioProcessor
 
 __all__ = [
-    'BluetoothAudioProcessor',
+    # 'BluetoothAudioProcessor',  # Disabled due to scipy compatibility
     'BaseAudioProcessor'
 ]

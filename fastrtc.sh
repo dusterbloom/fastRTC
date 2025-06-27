@@ -60,11 +60,15 @@ MODES:
 
 OPTIONS:
     --log-level LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)
+    --threading          Enable threading pipeline (experimental)
+    --no-fallback        Disable fallback to async pipeline
     --help, -h           Show this help message
 
 EXAMPLES:
     ./fastrtc.sh dev                           # Start local development
     ./fastrtc.sh dev --log-level INFO          # Development with INFO logging
+    ./fastrtc.sh dev --threading               # Development with threading pipeline
+    ./fastrtc.sh dev --threading --no-fallback # Threading without async fallback
     ./fastrtc.sh docker                        # Start Docker services
     EXTERNAL_IP=1.2.3.4 ./fastrtc.sh prod     # Production with external IP
     OLLAMA_URL=http://custom:11434 ./fastrtc.sh dev  # Custom service URL
@@ -186,6 +190,11 @@ LLM_MODEL=llama3.2:3b
 # Redis settings (optional)
 REDIS_URL=redis://localhost:6379
 REDIS_DB=0
+
+# Threading pipeline settings (experimental)
+USE_THREADING_PIPELINE=false
+THREADING_FALLBACK_TO_ASYNC=true
+THREADING_MAX_QUEUE_SIZE=100
 
 # Add any custom environment variables below
 EOF
@@ -316,6 +325,17 @@ run_development() {
     check_dev_dependencies
     setup_environment "dev"
     
+    # Re-apply command line overrides after loading environment files
+    # This ensures command line flags take precedence over environment files
+    if [[ "${USE_THREADING_PIPELINE:-false}" == "true" ]]; then
+        export USE_THREADING_PIPELINE=true
+        log_info "Command line override: Threading pipeline enabled"
+    fi
+    if [[ "${THREADING_FALLBACK_TO_ASYNC:-true}" == "false" ]]; then
+        export THREADING_FALLBACK_TO_ASYNC=false
+        log_info "Command line override: Threading fallback disabled"
+    fi
+    
     # Check if virtual environment exists and activate it
     if [[ -d "$SCRIPT_DIR/backend/venv" ]]; then
         log_info "Activating Python virtual environment..."
@@ -324,16 +344,15 @@ run_development() {
         log_info "Python path: $(which python3)"
         
         # Check if requirements are installed
-        log_info "Checking FastRTC installation..."
-        if python3 -c "import fastrtc" 2>/dev/null; then
-            local fastrtc_version=$(python3 -c "import fastrtc; print(fastrtc.__version__)" 2>/dev/null || echo "unknown")
-            log_success "FastRTC version: $fastrtc_version"
+        log_info "Checking required packages installation..."
+        if python3 -c "import uvicorn, fastapi, numpy, torch" 2>/dev/null; then
+            log_success "Core packages are installed"
         else
-            log_warn "FastRTC not found in virtual environment"
+            log_warn "Some packages missing from virtual environment"
             log_info "Installing requirements..."
             cd "$SCRIPT_DIR/backend"
             pip install -r requirements.txt
-            pip install --upgrade fastrtc
+            pip install --no-deps fastrtc==0.0.28
             cd "$SCRIPT_DIR"
             log_success "Requirements installed"
         fi
@@ -343,8 +362,8 @@ run_development() {
         cd "$SCRIPT_DIR/backend"
         python3 -m venv venv
         source venv/bin/activate
+        pip install --upgrade pip
         pip install -r requirements.txt
-        pip install --upgrade fastrtc
         cd "$SCRIPT_DIR"
         log_success "Virtual environment created and requirements installed"
     fi
@@ -352,7 +371,24 @@ run_development() {
     # Start backend
     log_info "Starting backend server..."
     cd "$SCRIPT_DIR/backend"
-    python3 start_deferred.py &
+    
+    # Build command with threading arguments if set
+    cmd="python3 start_deferred.py"
+    if [[ "${USE_THREADING_PIPELINE:-false}" == "true" ]]; then
+        cmd="$cmd --threading"
+        log_info "Threading pipeline enabled"
+    fi
+    if [[ "${THREADING_FALLBACK_TO_ASYNC:-true}" == "false" ]]; then
+        cmd="$cmd --no-fallback"
+        log_info "Threading fallback disabled"
+    fi
+    
+    # Debug: Show environment variable values
+    log_info "Debug: USE_THREADING_PIPELINE=${USE_THREADING_PIPELINE:-false}"
+    log_info "Debug: THREADING_FALLBACK_TO_ASYNC=${THREADING_FALLBACK_TO_ASYNC:-true}"
+    
+    log_info "Starting backend with: $cmd"
+    $cmd &
     BACKEND_PID=$!
     cd "$SCRIPT_DIR"
     
@@ -535,6 +571,14 @@ parse_arguments() {
                     log_error "Invalid log level. Use: DEBUG, INFO, WARNING, or ERROR"
                     exit 1
                 fi
+                ;;
+            --threading)
+                export USE_THREADING_PIPELINE=true
+                shift
+                ;;
+            --no-fallback)
+                export THREADING_FALLBACK_TO_ASYNC=false
+                shift
                 ;;
             -h|--help|help)
                 show_usage

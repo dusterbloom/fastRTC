@@ -11,7 +11,8 @@ import asyncio
 from typing import Optional
 
 from .voice_assistant import VoiceAssistant
-from ..integration import FastRTCBridge, StreamCallbackHandler
+from ..integration import FastRTCBridge
+from ..integration.unified_callback_handler import UnifiedCallbackHandler
 from ..utils.async_utils import AsyncEnvironmentManager
 from ..utils.logging import get_logger, setup_logging
 from ..config.settings import DEFAULT_SPEECH_THRESHOLD
@@ -34,7 +35,7 @@ class VoiceAssistantApplication:
         """Initialize the voice assistant application."""
         self.voice_assistant: Optional[VoiceAssistant] = None
         self.fastrtc_bridge: Optional[FastRTCBridge] = None
-        self.callback_handler: Optional[StreamCallbackHandler] = None
+        self.callback_handler: Optional[UnifiedCallbackHandler] = None
         self.async_env_manager: Optional[AsyncEnvironmentManager] = None
         self.is_running = False
         
@@ -78,9 +79,9 @@ class VoiceAssistantApplication:
             # Get the event loop for callback handler
             event_loop = self.async_env_manager.get_event_loop()
             
-            # Initialize stream callback handler
-            logger.info("🎤 Creating streaming callback handler...")
-            self.callback_handler = StreamCallbackHandler(
+            # Initialize unified callback handler
+            logger.info("🎤 Creating unified callback handler...")
+            self.callback_handler = UnifiedCallbackHandler(
                 voice_assistant=self.voice_assistant,
                 stt_engine=self.voice_assistant.stt_engine,
                 tts_engine=self.voice_assistant.tts_engine,
@@ -181,6 +182,11 @@ class VoiceAssistantApplication:
         self.is_running = False
         
         try:
+            # Stop callback handler
+            if self.callback_handler:
+                logger.info("🎤 Stopping callback handler...")
+                self.callback_handler.stop()
+            
             # Stop FastRTC stream
             if self.fastrtc_bridge:
                 logger.info("🛑 Stopping FastRTC stream...")

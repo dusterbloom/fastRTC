@@ -5,6 +5,7 @@ Handles FastRTC stream setup, configuration, and WebRTC connection lifecycle.
 Extracted from the original voice assistant implementation.
 """
 
+import os
 import logging
 from typing import Optional, Dict, Any, Callable
 from fastrtc import Stream, ReplyOnPause, AlgoOptions, SileroVadOptions
@@ -56,11 +57,23 @@ class FastRTCBridge:
         logger.debug(f"🌐 Server: {server_name}:{server_port}")
         
         try:
+            # Create debug wrapper for callback to log invocations and handle generator
+            def debug_callback_wrapper(audio_data_tuple):
+                logger.info(f"🎤 FASTRTC CALLBACK INVOKED: audio_data_type={type(audio_data_tuple)}")
+                if hasattr(audio_data_tuple, '__len__') and len(audio_data_tuple) >= 2:
+                    audio_data, sample_rate = audio_data_tuple[0], audio_data_tuple[1]
+                    logger.info(f"🎤 Audio data: {type(audio_data)}, samples: {getattr(audio_data, 'size', 'unknown')}, rate: {sample_rate}")
+                
+                # Our callback returns a generator, but FastRTC expects direct results
+                # Consume the generator and yield each result
+                for result in callback_function(audio_data_tuple):
+                    yield result
+            
             # Create stream with ReplyOnPause for voice activity detection
             logger.debug("🌐 Creating ReplyOnPause with callback...")
             self.stream = Stream(
                 ReplyOnPause(
-                    callback_function,
+                    debug_callback_wrapper,
                     can_interrupt=True,
                     algo_options=AlgoOptions(
                         # This is the GATEKEEPER. We are making it extremely sensitive.

@@ -21,6 +21,27 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
+# Early argument parsing to set threading environment variables before imports
+def parse_early_args():
+    """Parse only threading arguments early to set environment variables before imports."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--threading', action='store_true')
+    parser.add_argument('--no-fallback', action='store_true')
+    args, _ = parser.parse_known_args()
+    
+    if args.threading:
+        os.environ['USE_THREADING_PIPELINE'] = 'true'
+        print(f"🧵 Threading pipeline enabled via command line")
+    
+    if args.no_fallback:
+        os.environ['THREADING_FALLBACK_TO_ASYNC'] = 'false'
+        print(f"🚫 Threading fallback disabled via command line")
+    
+    return args
+
+# Parse threading arguments before any imports
+early_args = parse_early_args()
+
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -32,18 +53,22 @@ sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 from src.core.voice_assistant import VoiceAssistant
 from src.integration.fastrtc_bridge import FastRTCBridge
-from src.integration.streaming_callback_handler import StreamingCallbackHandler as StreamCallbackHandler
+from src.integration.unified_callback_handler import UnifiedCallbackHandler
 from src.utils.async_utils import AsyncEnvironmentManager
 from src.config.settings import load_config
 from src.utils.logging import get_logger, setup_logging
 
-# Parse command line arguments for log level
+# Parse command line arguments for log level and threading options
 def parse_args():
     parser = argparse.ArgumentParser(description='FastRTC Voice Assistant Server')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], 
                        help='Set logging level (overrides LOG_LEVEL environment variable)')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
     parser.add_argument('--port', type=int, default=8000, help='Port to bind to')
+    parser.add_argument('--threading', action='store_true',
+                       help='Enable threading pipeline (experimental)')
+    parser.add_argument('--no-fallback', action='store_true',
+                       help='Disable fallback to async pipeline')
     return parser.parse_args()
 
 # Initial setup - read log level from environment (command line args parsed in main)
@@ -61,7 +86,7 @@ class GlobalComponents:
     def __init__(self):
         self.voice_assistant: Optional[VoiceAssistant] = None
         self.fastrtc_bridge: Optional[FastRTCBridge] = None
-        self.callback_handler: Optional[StreamCallbackHandler] = None
+        self.callback_handler: Optional[UnifiedCallbackHandler] = None
         self.async_env_manager: Optional[AsyncEnvironmentManager] = None
         self.stream = None
         self.is_initialized = False
@@ -99,14 +124,23 @@ async def initialize_voice_assistant_deferred(app: FastAPI):
         # Create FastRTC bridge
         fastrtc_bridge = FastRTCBridge()
         
-        # Create callback handler
-        callback_handler = StreamCallbackHandler(
+        # Create callback handler with debug logging
+        logger.info("🎯 Creating UnifiedCallbackHandler...")
+        logger.info(f"🧵 Threading pipeline environment: USE_THREADING_PIPELINE={os.getenv('USE_THREADING_PIPELINE', 'false')}")
+        logger.info(f"🔄 Threading fallback environment: THREADING_FALLBACK_TO_ASYNC={os.getenv('THREADING_FALLBACK_TO_ASYNC', 'true')}")
+        
+        callback_handler = UnifiedCallbackHandler(
             voice_assistant=voice_assistant,
             stt_engine=voice_assistant.stt_engine,
             tts_engine=voice_assistant.tts_engine,
             voice_mapper=voice_assistant.voice_mapper,
             event_loop=async_env_manager.get_event_loop()
         )
+        
+        # Log which handler was actually initialized
+        handler_stats = callback_handler.get_handler_stats()
+        logger.info(f"✅ UnifiedCallbackHandler initialized with: {handler_stats.get('handler_type', 'unknown')} handler")
+        logger.info(f"📊 Handler stats: {handler_stats}")
         
         # Create FastRTC stream with proper network configuration
         logger.info("Creating FastRTC stream...")
@@ -382,6 +416,13 @@ if __name__ == "__main__":
     print("🎤 WebRTC endpoint will be mounted at /assistant after initialization")
     print("💡 Check /health for component status")
     print(f"📊 Log level: {os.getenv('LOG_LEVEL', 'INFO')}")
+    
+    # Show threading configuration
+    if os.getenv('USE_THREADING_PIPELINE', 'false').lower() == 'true':
+        print("🧵 Threading pipeline: ENABLED")
+        print(f"🔄 Async fallback: {'DISABLED' if os.getenv('THREADING_FALLBACK_TO_ASYNC', 'true').lower() == 'false' else 'ENABLED'}")
+    else:
+        print("🔄 Using async pipeline (threading disabled)")
     
     uvicorn.run(
         app,

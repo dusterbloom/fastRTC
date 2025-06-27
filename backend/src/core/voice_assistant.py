@@ -12,7 +12,7 @@ import numpy as np
 import aiohttp
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
+from typing import Optional, Dict, Any, List, Generator, TYPE_CHECKING
 from .interfaces import AudioData
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 from ..audio import (
-    BluetoothAudioProcessor, STTEngine, KokoroTTSEngine,
+    STTEngine, KokoroTTSEngine,
     VoiceMapper
 )
 from ..audio.user_identification import SpokenUserIdentifier
@@ -49,7 +49,6 @@ class VoiceAssistant:
     
     def __init__(
         self,
-        audio_processor: Optional[BluetoothAudioProcessor] = None,
         stt_engine: Optional[STTEngine] = None,
         tts_engine: Optional[KokoroTTSEngine] = None,
         voice_mapper: Optional[VoiceMapper] = None,
@@ -93,8 +92,6 @@ class VoiceAssistant:
         self.identified_name = None  # Store the identified name separately
 
         # Initialize or use provided components
-        logger.debug("VoiceAssistant.__init__: Creating audio processor")
-        self.audio_processor = audio_processor or BluetoothAudioProcessor()
         logger.debug("VoiceAssistant.__init__: Creating STT engine")
         self.stt_engine = stt_engine or STTEngine()
         logger.debug("VoiceAssistant.__init__: Creating TTS engine")
@@ -443,6 +440,145 @@ class VoiceAssistant:
             
             # Log complete assistant response
             conversation_logger.log_assistant_response(full_response)
+    
+    # ================================
+    # Sync Methods for Threading Pipeline
+    # ================================
+    
+    def get_llm_response_sync(self, user_text: str) -> str:
+        """
+        Get intelligent LLM response synchronously for threading pipeline.
+        
+        This method provides the same functionality as get_llm_response_smart
+        but works in pure sync context without event loops.
+        
+        Args:
+            user_text: User input text
+            
+        Returns:
+            Generated response text
+        """
+        try:
+            # Import sync service
+            from ..services.sync_llm_service import SyncLLMService
+            
+            # Check cache first
+            cached_response = self.get_cached_response(user_text)
+            if cached_response:
+                logger.info("📋 Using cached response (sync)")
+                conversation_logger.log_assistant_response(cached_response)
+                return cached_response
+            
+            # Log user input
+            conversation_logger.log_user_input(user_text)
+            
+            # Build context from A-MEM memory (sync access to current state)
+            amem_context = ""
+            if self.memory_manager:
+                # Get current context without async operations
+                amem_context = self.memory_manager.get_user_context()
+                logger.debug(f"A-MEM Context for sync LLM: {amem_context}")
+            
+            # Create sync LLM service matching the async service config
+            sync_llm = None
+            if hasattr(self, 'llm_service') and self.llm_service:
+                sync_llm = SyncLLMService(
+                    use_ollama=self.llm_service.use_ollama,
+                    ollama_url=self.llm_service.ollama_url,
+                    ollama_model=self.llm_service.ollama_model,
+                    lm_studio_url=self.llm_service.lm_studio_url,
+                    lm_studio_model=self.llm_service.lm_studio_model,
+                    timeout=self.llm_service.timeout,
+                    max_tokens=self.llm_service.max_tokens,
+                    temperature=self.llm_service.temperature
+                )
+            else:
+                # Fallback to default config
+                sync_llm = SyncLLMService()
+            
+            # Get LLM response
+            response = sync_llm.get_response(user_text, amem_context)
+            
+            # Cache response
+            if response.strip():
+                self.cache_response(user_text, response)
+                conversation_logger.log_assistant_response(response)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Sync LLM response failed: {e}")
+            return "I'm sorry, I encountered an error processing your request."
+    
+    def stream_llm_response_sync(self, user_text: str) -> Generator[str, None, None]:
+        """
+        Stream intelligent LLM response synchronously for threading pipeline.
+        
+        Args:
+            user_text: User input text
+            
+        Yields:
+            str: Token chunks from LLM response
+        """
+        try:
+            # Import sync service and Generator type
+            from ..services.sync_llm_service import SyncLLMService
+            
+            # Check cache first
+            cached_response = self.get_cached_response(user_text)
+            if cached_response:
+                logger.info("📋 Using cached response for sync streaming")
+                conversation_logger.log_assistant_response(cached_response)
+                
+                # Stream cached response word by word
+                words = cached_response.split()
+                for i, word in enumerate(words):
+                    if i == 0:
+                        yield word
+                    else:
+                        yield " " + word
+                return
+            
+            # Log user input
+            conversation_logger.log_user_input(user_text)
+            
+            # Build context from A-MEM memory
+            amem_context = ""
+            if self.memory_manager:
+                amem_context = self.memory_manager.get_user_context()
+                logger.debug(f"A-MEM Context for sync streaming: {amem_context}")
+            
+            # Create sync LLM service matching the async service config
+            sync_llm = None
+            if hasattr(self, 'llm_service') and self.llm_service:
+                sync_llm = SyncLLMService(
+                    use_ollama=self.llm_service.use_ollama,
+                    ollama_url=self.llm_service.ollama_url,
+                    ollama_model=self.llm_service.ollama_model,
+                    lm_studio_url=self.llm_service.lm_studio_url,
+                    lm_studio_model=self.llm_service.lm_studio_model,
+                    timeout=self.llm_service.timeout,
+                    max_tokens=self.llm_service.max_tokens,
+                    temperature=self.llm_service.temperature
+                )
+            else:
+                # Fallback to default config
+                sync_llm = SyncLLMService()
+            
+            # Stream LLM response
+            full_response = ""
+            for token in sync_llm.stream_response(user_text, amem_context):
+                full_response += token
+                yield token
+            
+            # Cache complete response
+            if full_response.strip():
+                self.cache_response(user_text, full_response)
+                conversation_logger.log_assistant_response(full_response)
+                
+        except Exception as e:
+            logger.error(f"❌ Sync LLM streaming failed: {e}")
+            yield "I'm sorry, I encountered an error processing your request."
     
     def detect_language_from_text(self, text: str) -> str:
         """

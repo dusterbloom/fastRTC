@@ -4,7 +4,7 @@ This module provides audio processing, speech-to-text, text-to-speech,
 and language detection capabilities.
 """
 
-from .processors.bluetooth_processor import BluetoothAudioProcessor
+# from .processors.bluetooth_processor import BluetoothAudioProcessor  # Disabled due to scipy compatibility
 from .engines.stt import STTEngine
 from .engines.tts.kokoro_tts import KokoroTTSEngine
 from .language.detector import HybridLanguageDetector, MediaPipeLanguageDetector, KeywordLanguageDetector
@@ -12,7 +12,7 @@ from .language.voice_mapper import VoiceMapper
 from .user_identification import SpokenUserIdentifier, VoicePrintManager
 
 __all__ = [
-    'BluetoothAudioProcessor',
+    # 'BluetoothAudioProcessor',  # Disabled due to scipy compatibility
     'STTEngine', 
     'KokoroTTSEngine',
     'HybridLanguageDetector',
