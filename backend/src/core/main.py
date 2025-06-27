@@ -117,11 +117,7 @@ class VoiceAssistantApplication:
         try:
             # Determine speech threshold
             if speech_threshold is None:
-                if (self.voice_assistant and 
-                    self.voice_assistant.audio_processor.noise_floor):
-                    speech_threshold = self.voice_assistant.audio_processor.noise_floor * 15
-                else:
-                    speech_threshold = DEFAULT_SPEECH_THRESHOLD
+                speech_threshold = DEFAULT_SPEECH_THRESHOLD
             
             logger.info(f"🎯 Using speech threshold: {speech_threshold}")
             

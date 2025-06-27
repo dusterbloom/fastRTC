@@ -8,7 +8,7 @@ Uses async operations within thread event loop for FastRTC compatibility.
 import time
 import asyncio
 import numpy as np
-from typing import Optional, AsyncGenerator, Tuple
+from typing import Optional, AsyncGenerator, Tuple, Any
 
 from .pipeline_workers import BasePipelineWorker
 from .pipeline_manager import (
@@ -366,6 +366,22 @@ class TTSStreamingWorker(BasePipelineWorker):
         if hasattr(item, 'generation_id'):
             self.active_generations.discard(item.generation_id)
             
+    def process_item(self, llm_chunk) -> Optional[Any]:
+        """
+        Synchronous wrapper for process_item_async.
+        Required by BasePipelineWorker abstract method.
+        
+        Args:
+            llm_chunk: LLM chunk data to process
+            
+        Returns:
+            None - this worker uses async processing
+        """
+        # This method should not be called directly since TTSStreamingWorker
+        # overrides the worker loop to use async processing
+        logger.warning("process_item called on TTSStreamingWorker - this should use async processing")
+        return None
+        
     def get_worker_stats(self) -> dict:
         """Get TTS worker statistics."""
         stats = super().get_worker_stats()

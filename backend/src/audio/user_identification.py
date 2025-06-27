@@ -42,9 +42,14 @@ class SpokenUserIdentifier:
             self.activation_phrases = {
                 # User registration
                 'register': [
-                    r"register (?:as )?(\w+) (?:pin|PIN) (\d{4})",
-                    r"sign up (?:as )?(\w+) (?:pin|PIN) (\d{4})",
-                    r"create (?:user )?(\w+) (?:pin|PIN) (\d{4})"
+                    r"register (?:as )?(\\w+) (?:pin|PIN) (\\d{4})",
+                    r"register (?:as )?(\\w+) (?:pin|PIN) (\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)",
+                    r"register (?:myself )?(?:as )?(\\w+)[.,]? (?:pin|PIN) (\\d{4})",
+                    r"register (?:myself )?(?:as )?(\\w+)[.,]? (?:pin|PIN) (\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)",
+                    r"sign up (?:as )?(\\w+) (?:pin|PIN) (\\d{4})",
+                    r"sign up (?:as )?(\\w+) (?:pin|PIN) (\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)",
+                    r"create (?:user )?(\\w+) (?:pin|PIN) (\\d{4})",
+                    r"create (?:user )?(\\w+) (?:pin|PIN) (\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)"
                 ],
                 # Login attempts (triggers PIN request)
                 'login': [
@@ -65,9 +70,12 @@ class SpokenUserIdentifier:
                 ],
                 # PIN responses (when system is waiting for PIN)
                 'pin': [
-                    r"(?:pin|PIN) (?:is )?(\d{4})",
-                    r"(?:my pin is )?(\d{4})",
-                    r"(\d{4})"  # Just the 4-digit number
+                    r"(?:pin|PIN) (?:is )?(\\d{4})",
+                    r"(?:pin|PIN) (?:is )?(\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)",
+                    r"(?:my pin is )?(\\d{4})",
+                    r"(?:my pin is )?(\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)",
+                    r"(\\d{4})",  # Just the 4-digit number
+                    r"(\\d)[,\\s]+(\\d)[,\\s]+(\\d)[,\\s]+(\\d)"  # Spaced digits
                 ],
                 # Cancel commands
                 'cancel': [
@@ -217,7 +225,17 @@ class SpokenUserIdentifier:
             for pattern in self.activation_phrases['pin']:
                 match = re.search(pattern, text, re.IGNORECASE)
                 if match:
-                    pin = match.group(1)
+                    # Handle both formats: "1234" and "1, 2, 3, 4"
+                    if match.lastindex == 1:
+                        # Standard format: 4-digit PIN
+                        pin = match.group(1)
+                    elif match.lastindex == 4:
+                        # Spaced format: 4 individual digits
+                        pin = match.group(1) + match.group(2) + match.group(3) + match.group(4)
+                    else:
+                        logger.debug(f"🚫 Unexpected PIN match groups: {match.groups()}")
+                        continue
+                    
                     username = self.pending_login
                     self.pending_login = None  # Clear pending state
                     
@@ -242,7 +260,17 @@ class SpokenUserIdentifier:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 username = match.group(1).lower().strip()
-                pin = match.group(2)
+                
+                # Handle both formats: "1234" and "1, 2, 3, 4"
+                if match.lastindex == 2:
+                    # Standard format: username + 4-digit PIN
+                    pin = match.group(2)
+                elif match.lastindex == 5:
+                    # Spaced format: username + 4 individual digits
+                    pin = match.group(2) + match.group(3) + match.group(4) + match.group(5)
+                else:
+                    logger.debug(f"🚫 Unexpected match groups: {match.groups()}")
+                    continue
                 
                 # Validate username
                 if username in blacklisted_words or len(username) < 2:

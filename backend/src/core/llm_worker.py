@@ -8,7 +8,7 @@ Uses async operations within thread event loop for FastRTC compatibility.
 import time
 import asyncio
 import re
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, Any
 
 from .pipeline_workers import BasePipelineWorker
 from .pipeline_manager import (
@@ -46,6 +46,9 @@ class LLMStreamingWorker(BasePipelineWorker):
         self.voice_assistant = voice_assistant
         self.min_sentence_length = min_sentence_length
         self.sentence_endings = sentence_endings
+        
+        # Log that LLM worker is being used
+        logger.info("🧠 [LLM_WORKER] LLM Worker initialized - authentication enabled")
         
         # Token buffering for sentence completion
         self.token_buffers = {}  # generation_id -> accumulated tokens
@@ -127,6 +130,7 @@ class LLMStreamingWorker(BasePipelineWorker):
         Returns:
             LLMTokenChunk with response tokens, or None if still processing
         """
+        logger.info(f"🧠 [LLM_WORKER] process_item_async called with transcription: {transcription.text[:50]}...")
         generation_id = transcription.generation_id
         
         # Skip partial transcriptions
@@ -149,9 +153,106 @@ class LLMStreamingWorker(BasePipelineWorker):
         if not user_text:
             logger.debug(f"Empty transcription for generation {generation_id}")
             return None
+        
+        # Check for authentication/user identification
+        logger.info(f"🔍 [LLM_WORKER] Starting authentication check for text: '{user_text[:100]}...'")
+        
+        auth_result = None
+        try:
+            if hasattr(self.voice_assistant, 'voice_print_manager') and self.voice_assistant.voice_print_manager:
+                auth_result = self.voice_assistant.voice_print_manager.process_text(user_text)
+                logger.info(f"🔍 [LLM_WORKER] Authentication result: {auth_result}")
+            else:
+                logger.warning(f"❌ [LLM_WORKER] voice_print_manager not available")
+        except Exception as auth_error:
+            logger.error(f"❌ [LLM_WORKER] Authentication error: {auth_error}")
+            import traceback
+            logger.error(f"❌ [LLM_WORKER] Auth traceback: {traceback.format_exc()}")
+            auth_result = None
+        
+        if auth_result:
+            action = auth_result.get('action')
+            confirmation_message = None
+            
+            if action == 'user_identified':
+                # Successful login
+                identified_user_id = auth_result['user_id']
+                if identified_user_id != self.voice_assistant.user_id:
+                    logger.info(f"🔄 [LLM_WORKER] User authenticated: switching from '{self.voice_assistant.user_id}' to '{identified_user_id}'")
+                    
+                    # Extract username for display
+                    username = identified_user_id.replace("user_", "")
+                    
+                    # Switch memory manager to new user
+                    if self.voice_assistant.memory_manager.switch_user(identified_user_id):
+                        logger.info(f"✅ [LLM_WORKER] Memory manager switched to user: {identified_user_id}")
+                        
+                        # Refresh session with new authenticated user
+                        self.voice_assistant.refresh_session_after_auth(identified_user_id, username)
+                        
+                        confirmation_message = f"Welcome back, {username}! I've loaded your personal memory profile and started a fresh session."
+                    else:
+                        logger.error(f"❌ [LLM_WORKER] Failed to switch memory manager to user: {identified_user_id}")
+                        confirmation_message = "I recognized you, but there was an issue accessing your personal profile."
+            
+            elif action == 'pin_request':
+                # User exists, need PIN
+                username = auth_result['username']
+                confirmation_message = f"Hello {username}! Please provide your 4-digit PIN to access your profile."
+                
+            elif action == 'registration_success':
+                # New user registered and logged in
+                identified_user_id = auth_result['user_id']
+                username = identified_user_id.replace("user_", "")
+                
+                if self.voice_assistant.memory_manager.switch_user(identified_user_id):
+                    logger.info(f"✅ [LLM_WORKER] New user registered: {identified_user_id}")
+                    
+                    # Refresh session with new registered user
+                    self.voice_assistant.refresh_session_after_auth(identified_user_id, username)
+                    
+                    confirmation_message = f"Welcome {username}! Your account has been created and I'll remember our conversations in your new session."
+                else:
+                    logger.error(f"❌ [LLM_WORKER] Failed to switch memory manager for new user: {identified_user_id}")
+                    confirmation_message = "Your account was created, but there was an issue setting up your memory profile."
+            
+            elif action == 'suggest_registration':
+                # User identified but not registered
+                username = auth_result.get('username', 'unknown')
+                confirmation_message = auth_result.get('message', f"I don't know you yet, {username}. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN.")
+            
+            elif action == 'login_cancelled':
+                # User cancelled login
+                username = auth_result.get('username', 'someone')
+                confirmation_message = f"No problem, {username}. I'll continue with the temporary session."
+            
+            elif action == 'auth_failed':
+                # Authentication failed
+                reason = auth_result.get('reason', 'unknown')
+                if reason == 'invalid_pin':
+                    confirmation_message = "Sorry, that PIN is incorrect. Please try again or say 'cancel' to stop."
+                elif reason == 'user_not_found':
+                    username = auth_result.get('username', 'unknown')
+                    confirmation_message = f"I don't have a user named '{username}'. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN."
+                elif reason == 'invalid_username':
+                    confirmation_message = "That username isn't valid. Please choose a different name."
+                else:
+                    confirmation_message = "Authentication failed. Please try again."
+            
+            # If we have a confirmation message, return it directly instead of processing through LLM
+            if confirmation_message:
+                logger.info(f"🔐 [LLM_WORKER] Returning authentication message: {confirmation_message}")
+                # Create a simple token chunk with the confirmation message
+                return LLMTokenChunk(
+                    generation_id=generation_id,
+                    tokens=[confirmation_message],
+                    is_sentence_complete=True,
+                    sentence_text=confirmation_message,
+                    is_final=True
+                )
             
         try:
-            logger.info(f"🧠 Starting LLM processing for generation {generation_id}: '{user_text}'")
+            logger.info(f"🧠 [LLM_WORKER] Starting LLM processing for generation {generation_id}: '{user_text}'")
             
             # Stream LLM response tokens async
             return await self._stream_llm_response_async(generation_id, user_text, state)
@@ -365,6 +466,22 @@ class LLMStreamingWorker(BasePipelineWorker):
         if hasattr(item, 'generation_id'):
             self.cleanup_buffers(item.generation_id)
             
+    def process_item(self, transcription_chunk) -> Optional[Any]:
+        """
+        Synchronous wrapper for process_item_async.
+        Required by BasePipelineWorker abstract method.
+        
+        Args:
+            transcription_chunk: Transcription data to process
+            
+        Returns:
+            None - this worker uses async processing
+        """
+        # This method should not be called directly since LLMStreamingWorker
+        # overrides the worker loop to use async processing
+        logger.warning("process_item called on LLMStreamingWorker - this should use async processing")
+        return None
+        
     def get_worker_stats(self) -> dict:
         """Get LLM worker statistics."""
         stats = super().get_worker_stats()

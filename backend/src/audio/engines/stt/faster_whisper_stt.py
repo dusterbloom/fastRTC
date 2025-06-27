@@ -47,19 +47,10 @@ class FasterWhisperSTT(BaseSTTEngine):
             if env_model_path:
                 model_path = env_model_path
                 logger.info(f"Using model path from FASTER_WHISPER_MODEL_PATH: {model_path}")
-            elif not _MODEL_DIR.exists():
-                # Try alternative path for development
-                dev_model_dir = Path("./models/whisper-v3-ct2")
-                if dev_model_dir.exists():
-                    model_path = str(dev_model_dir)
-                    logger.info(f"Using development model path: {model_path}")
-                else:
-                    # Fall back to downloading if not available
-                    model_path = "large-v3"
-                    logger.warning("Model directory not found, will download on first use")
             else:
-                model_path = str(_MODEL_DIR)
-                logger.info(f"Using default model path: {model_path}")
+                # Use HF model identifier to leverage HF cache (avoids incomplete local downloads)
+                model_path = "Systran/faster-whisper-large-v3"
+                logger.info(f"Using HF model identifier: {model_path}")
             
             # Try GPU first, fallback to CPU if it fails
             try:

@@ -16,7 +16,7 @@ class ThreadingPipelineConfig:
     
     # Feature flags
     enabled: bool = False
-    fallback_to_async: bool = False  # Fallback to async pipeline if threading fails
+    fallback_to_async: bool = True  # Fallback to async pipeline if threading fails
     
     # Performance settings
     max_queue_size: int = 100
