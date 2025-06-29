@@ -352,7 +352,7 @@ run_development() {
             log_info "Installing requirements..."
             cd "$SCRIPT_DIR/backend"
             pip install -r requirements.txt
-            pip install --no-deps fastrtc==0.0.28
+            pip install --no-deps fastrtc[vad,stt,tts]==0.0.28 
             cd "$SCRIPT_DIR"
             log_success "Requirements installed"
         fi

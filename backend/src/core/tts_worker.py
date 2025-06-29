@@ -143,12 +143,12 @@ class TTSStreamingWorker(BasePipelineWorker):
             
         # Skip if only partial sentence and not complete
         if not llm_chunk.is_sentence_complete:
-            logger.debug(f"Skipping partial sentence for generation {generation_id}")
+            logger.info(f"🔊 [TTS WORKER] Skipping partial sentence for generation {generation_id}: '{llm_chunk.text}'")
             return None
             
         text_to_synthesize = llm_chunk.text.strip()
         if not text_to_synthesize:
-            logger.debug(f"Empty text for generation {generation_id}")
+            logger.warning(f"🔊 [TTS WORKER] Empty text for generation {generation_id}")
             return None
             
         try:
@@ -181,7 +181,10 @@ class TTSStreamingWorker(BasePipelineWorker):
             voices = self.voice_mapper.get_voices_for_language(current_language)
             voice_id = voices[0] if voices else None
             
-            logger.debug(f"🔊 Using voice '{voice_id}' for language '{current_language}'")
+            logger.info(f"🔊 [TTS WORKER] Starting synthesis for generation {generation_id}")
+            logger.info(f"🔊 [TTS WORKER] Text: '{text}' (length: {len(text)})")
+            logger.info(f"🔊 [TTS WORKER] Voice: '{voice_id}', Language: '{current_language}'")
+            logger.info(f"🔊 [TTS WORKER] TTS Engine type: {type(self.tts_engine)}")
             
             # Stream TTS synthesis using existing engine async
             total_samples = 0
@@ -190,17 +193,21 @@ class TTSStreamingWorker(BasePipelineWorker):
             
             # Use async TTS synthesis
             if hasattr(self.tts_engine, 'stream_synthesis_async'):
+                logger.info(f"🔊 [TTS WORKER] Using stream_synthesis_async")
                 # Use async streaming method
                 synthesis_stream = self.tts_engine.stream_synthesis_async(text, voice_id, current_language)
             elif hasattr(self.tts_engine, 'stream_synthesis'):
+                logger.info(f"🔊 [TTS WORKER] Using stream_synthesis (wrapped)")
                 # Wrap sync generator in async generator
                 synthesis_stream = self._wrap_sync_generator(
                     self.tts_engine.stream_synthesis(text, voice_id, current_language)
                 )
             else:
+                logger.info(f"🔊 [TTS WORKER] Using fallback synthesis")
                 # Fallback to basic synthesis
                 synthesis_stream = self._fallback_synthesis_async(text, voice_id, current_language)
             
+            logger.info(f"🔊 [TTS WORKER] Starting synthesis stream iteration...")
             async for sample_rate, audio_chunk in synthesis_stream:
                 # Check for interruption - both generation state and TTS engine flag
                 if state.interrupted.is_set() or self.tts_engine.should_interrupt:
@@ -233,6 +240,8 @@ class TTSStreamingWorker(BasePipelineWorker):
                             logger.debug(f"🔊 Pushed audio chunk {total_audio_chunks} for generation {generation_id}: "
                                        f"{mini_chunk.size} samples")
                             
+            logger.info(f"🔊 [TTS WORKER] Synthesis completed. Chunks: {chunk_count}, Samples: {total_samples}, Audio chunks: {total_audio_chunks}")
+            
             # Send final chunk marker if we generated any audio
             if total_audio_chunks > 0:
                 # Create a final empty chunk to signal completion
@@ -244,6 +253,9 @@ class TTSStreamingWorker(BasePipelineWorker):
                 )
                 await asyncio.to_thread(self.output_queue.put, final_chunk)
                 total_audio_chunks += 1
+                logger.info(f"🔊 [TTS WORKER] Sent final chunk marker")
+            else:
+                logger.warning(f"🔊 [TTS WORKER] No audio chunks generated for generation {generation_id}")
                 
             # Mark as completed if not interrupted
             if not state.interrupted.is_set():

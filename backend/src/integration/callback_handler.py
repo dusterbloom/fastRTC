@@ -560,6 +560,11 @@ class StreamCallbackHandler:
                 # Stream TTS audio using the same logic as the original backup
                 chunk_count = 0
                 total_samples = 0
+                
+                print(f"[TTS DEBUG] About to call stream_tts_synthesis with:")
+                print(f"[TTS DEBUG] response_text: '{response_text}' (length: {len(response_text)})")
+                print(f"[TTS DEBUG] voice_id: '{voice_id}'")
+                print(f"[TTS DEBUG] kokoro_lang_code: '{kokoro_lang_code}'")
 
                 for current_sr, current_chunk_array in self.voice_assistant.stream_tts_synthesis(
                     response_text, voice_id, kokoro_lang_code

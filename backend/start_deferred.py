@@ -37,6 +37,10 @@ def parse_early_args():
         os.environ['THREADING_FALLBACK_TO_ASYNC'] = 'false'
         print(f"🚫 Threading fallback disabled via command line")
     
+    # Enable GPU acceleration for Kokoro TTS
+    os.environ['ONNX_PROVIDER'] = 'CUDAExecutionProvider'
+    print(f"🚀 GPU acceleration enabled for Kokoro TTS")
+    
     return args
 
 # Parse threading arguments before any imports
@@ -106,6 +110,7 @@ async def initialize_voice_assistant_deferred(app: FastAPI):
     global components
     
     try:
+        logger.critical("🔥 [DEFERRED] initialize_voice_assistant_deferred() called!")
         logger.info("🚀 Starting deferred voice assistant initialization...")
         
         # Small delay to ensure server is fully ready
@@ -216,8 +221,10 @@ async def startup_event():
     This doesn't block the server from starting.
     """
     global _initialization_task
+    logger.critical("🔥 [STARTUP] startup_event() called!")
     # Create background task for initialization
     _initialization_task = asyncio.create_task(initialize_voice_assistant_deferred(app))
+    logger.critical("🔥 [STARTUP] Background task created, voice assistant initializing...")
     logger.info("🚀 Server started, voice assistant initializing in background...")
 
 @app.get("/")

@@ -60,6 +60,9 @@ class KokoroTTSEngine(BaseTTSEngine):
                 logger.info(f"🧠 Profiling: get_tts_model('kokoro') took {model_load_duration:.2f}s")
                 logger.info("✅ Using real fastRTC Kokoro TTS implementation")
                 
+                # Check and configure GPU acceleration
+                self._configure_gpu_acceleration()
+                
                 # Check available voices like V4
                 try:
                     if hasattr(self.tts_model, 'model') and hasattr(self.tts_model.model, 'voices'):
@@ -98,6 +101,76 @@ class KokoroTTSEngine(BaseTTSEngine):
         except Exception as e:
             logger.error(f"❌ Failed to load Kokoro TTS model: {e}")
             self._set_available(False)
+    
+    def _configure_gpu_acceleration(self) -> None:
+        """Configure GPU acceleration for Kokoro TTS if available."""
+        try:
+            import onnxruntime as ort
+            
+            # Check available providers
+            available_providers = ort.get_available_providers()
+            logger.info(f"🔧 Available ONNX providers: {available_providers}")
+            
+            # Check if GPU providers are available
+            gpu_providers = [p for p in available_providers if 'CUDA' in p or 'Tensorrt' in p]
+            
+            if gpu_providers:
+                logger.info(f"🚀 GPU acceleration available with providers: {gpu_providers}")
+                
+                # Set environment variable to force GPU usage in kokoro-onnx
+                # This will be picked up by the Kokoro constructor
+                preferred_provider = gpu_providers[0]  # Use the first available GPU provider
+                os.environ['ONNX_PROVIDER'] = preferred_provider
+                logger.info(f"🔧 Set ONNX_PROVIDER environment variable to: {preferred_provider}")
+                
+                # Try to configure the underlying Kokoro model for GPU if possible
+                if hasattr(self.tts_model, 'model') and hasattr(self.tts_model.model, 'sess'):
+                    # This is for kokoro-onnx models that expose the ONNX session
+                    try:
+                        current_providers = self.tts_model.model.sess.get_providers()
+                        logger.info(f"🔧 Current model providers: {current_providers}")
+                        
+                        # If not using GPU, try to recreate the session
+                        if not any('CUDA' in p or 'Tensorrt' in p for p in current_providers):
+                            logger.info("🔧 Model not using GPU, attempting to recreate session...")
+                            
+                            # Get model path from the session
+                            if hasattr(self.tts_model.model, 'config') and hasattr(self.tts_model.model.config, 'model_path'):
+                                model_path = self.tts_model.model.config.model_path
+                                logger.info(f"🔧 Recreating ONNX session with GPU providers for {model_path}")
+                                
+                                # Create new session with GPU providers prioritized
+                                session_options = ort.SessionOptions()
+                                session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                                providers = gpu_providers + ['CPUExecutionProvider']
+                                
+                                new_session = ort.InferenceSession(
+                                    model_path, 
+                                    sess_options=session_options,
+                                    providers=providers
+                                )
+                                
+                                # Replace the session if successful
+                                self.tts_model.model.sess = new_session
+                                logger.info(f"✅ Successfully configured Kokoro TTS with GPU acceleration: {new_session.get_providers()}")
+                            else:
+                                logger.info("🔧 Model path not accessible, GPU configuration via environment variable")
+                        else:
+                            logger.info(f"✅ Model already using GPU providers: {current_providers}")
+                            
+                    except Exception as gpu_config_error:
+                        logger.warning(f"⚠️ Could not configure GPU acceleration: {gpu_config_error}")
+                        logger.info("🔧 Falling back to environment variable configuration")
+                else:
+                    logger.info("🔧 Model session not directly accessible, GPU configuration via environment variable")
+                    
+            else:
+                logger.warning("⚠️ No GPU providers available, using CPU execution")
+                
+        except ImportError:
+            logger.warning("⚠️ ONNX Runtime not available for GPU configuration")
+        except Exception as e:
+            logger.warning(f"⚠️ Error configuring GPU acceleration: {e}")
     
     @time_tts("TTS Synthesis")
     async def _synthesize_text(self, text: str, voice: str, language: str) -> AudioData:
@@ -266,8 +339,8 @@ class KokoroTTSEngine(BaseTTSEngine):
         try:
             # Log the text being streamed
             logger.info(f"🤖 ASSISTANT: '{text}'")
-            if os.getenv("DEBUG_TTS", "false").lower() == "true":
-                logger.debug(f"🌊 TTS Stream Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
+            logger.info(f"🌊 TTS Stream Input: '{text}' (length: {len(text)} chars, words: {len(text.split())})")
+            logger.info(f"🔧 TTS Model Type: {type(self.tts_model)}")
             
             # Prepare TTS options
             options_params = {"speed": 1.05}
@@ -280,14 +353,13 @@ class KokoroTTSEngine(BaseTTSEngine):
             tts_options = KokoroTTSOptions(**options_params)
             
             # Enhanced logging
-            if os.getenv("DEBUG_TTS", "false").lower() == "true":
-                logger.debug(f"🔧 Stream TTS Options: voice='{voice}', lang='{kokoro_tts_lang}', speed={options_params['speed']}")
-            else:
-                logger.info(f"🔊 Streaming synthesis with voice '{voice}', lang '{kokoro_tts_lang}'")
+            logger.info(f"🔧 Stream TTS Options: voice='{voice}', lang='{kokoro_tts_lang}', speed={options_params['speed']}")
+            logger.info(f"🔊 Streaming synthesis with voice '{voice}', lang '{kokoro_tts_lang}'")
             
             chunk_count = 0
             total_samples = 0
             
+            logger.info(f"🔄 Starting stream_tts_sync iteration...")
             for tts_output_item in self.tts_model.stream_tts_sync(text, tts_options):
                 # Check for interruption before processing each chunk
                 if self.should_interrupt:
@@ -326,6 +398,7 @@ class KokoroTTSEngine(BaseTTSEngine):
                         if mini_chunk.size > 0:
                             yield (sample_rate, mini_chunk.astype(np.float32))
             
+            logger.info(f"🔄 Finished stream_tts_sync iteration. Processing {chunk_count} chunks, {total_samples} samples")
             logger.info(f"✅ Streaming synthesis completed. Chunks: {chunk_count}, Samples: {total_samples}")
             
         except Exception as e:

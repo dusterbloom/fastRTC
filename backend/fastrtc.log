@@ -1,0 +1,84 @@
+🧵 Threading pipeline enabled via command line
+2025-06-29 19:22:50 - backend.logging - INFO - Logging configured - Level: DEBUG
+/mnt/c/Users/PC/Dev/fastRTC/backend/start_deferred.py:212: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+🚀 Starting FastRTC Voice Assistant Server...
+📡 Server will be available at http://0.0.0.0:8000
+🎤 WebRTC endpoint will be mounted at /assistant after initialization
+💡 Check /health for component status
+📊 Log level: DEBUG
+🧵 Threading pipeline: ENABLED
+🔄 Async fallback: ENABLED
+INFO:     Started server process [77859]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+Request cb171818-b46e-4edd-80d7-d25c65178ead: GET https://huggingface.co/api/models/Systran/faster-whisper-large-v3/revision/main (authenticated: True)
+Request 872946bc-3da1-42e3-b136-2b98d27d69e0: HEAD https://huggingface.co/fastrtc/kokoro-onnx/resolve/main/kokoro-v1.0.onnx (authenticated: True)
+Request 111cd52e-6cb9-437e-8f9c-c781264b6596: HEAD https://huggingface.co/fastrtc/kokoro-onnx/resolve/main/voices-v1.0.bin (authenticated: True)
+[34mDEBUG   [0m [__init__.py:31] koko-onnx version 0.4.9 on Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.35 #1 SMP Tue Nov 5 00:21:55 UTC 2024[0m
+[34mDEBUG   [0m [__init__.py:50] Providers: ['CPUExecutionProvider'][0m
+[34mDEBUG   [0m [__init__.py:197] Creating audio for 1 batches for 15 phonemes[0m
+[34mDEBUG   [0m [__init__.py:96] Phonemes: həlˈoʊ, wˈɜːld![0m
+[34mDEBUG   [0m [__init__.py:128] Created audio in length of 1.73s for 15 phonemes in 0.28s (RTF: 0.16[0m
+[34mDEBUG   [0m [__init__.py:208] Created audio in 0.29s[0m
+2025-06-29 19:22:55 - src.a_mem.memory_system - DEBUG - AgenticMemorySystem.__init__: Starting initialization
+2025-06-29 19:22:55 - src.a_mem.memory_system - DEBUG - AgenticMemorySystem.__init__: About to create ChromaRetriever
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🔧 Using user-scoped collection: memories_user_session_user_20250629T172251Z for user: session_user_20250629T172251Z
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: Starting with persist_directory=/mnt/c/Users/PC/Dev/fastRTC/backend/chroma_db
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🔍 Found existing ChromaDB at /mnt/c/Users/PC/Dev/fastRTC/backend/chroma_db
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: About to create PersistentClient
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🧠 Profiling: Initializing ChromaDB PersistentClient at /mnt/c/Users/PC/Dev/fastRTC/backend/chroma_db...
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: PersistentClient created in 0.11s
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🧠 Profiling: ChromaDB PersistentClient initialized in 0.11s
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: About to create OllamaEmbeddingFunction with nomic-embed-text:latest
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🚀 Profiling: Initializing OllamaEmbeddingFunction with model nomic-embed-text:latest...
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🚀 Initialized OllamaEmbeddingFunction with model: nomic-embed-text:latest
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: OllamaEmbeddingFunction created in 0.00s
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🚀 Profiling: OllamaEmbeddingFunction (nomic-embed-text:latest) initialized in 0.00s
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: About to get/create collection 'memories_user_session_user_20250629T172251Z'
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🧠 Profiling: Getting or creating ChromaDB collection 'memories_user_session_user_20250629T172251Z'...
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: Calling get_or_create_collection
+2025-06-29 19:22:55 - src.a_mem.retrievers - DEBUG - ChromaRetriever.__init__: get_or_create_collection completed successfully
+2025-06-29 19:22:55 - src.a_mem.retrievers - INFO - 🧠 Profiling: ChromaDB collection 'memories_user_session_user_20250629T172251Z' ready in 0.05s
+2025-06-29 19:22:55 - src.a_mem.memory_system - DEBUG - AgenticMemorySystem.__init__: ChromaRetriever created successfully
+2025-06-29 19:22:55 - src.a_mem.memory_system - DEBUG - AgenticMemorySystem.__init__: Skipping memory loading (will be done async)
+2025-06-29 19:22:55 - src.a_mem.memory_system - DEBUG - AgenticMemorySystem.__init__: About to create LLMController
+2025-06-29 19:22:55 - src.a_mem.memory_system - DEBUG - AgenticMemorySystem.__init__: LLMController created successfully
+2025-06-29 19:22:55 - src.a_mem.memory_system - INFO - 🚀 Redis cache initialized for memory system
+Request bc5f82c8-27aa-46ef-8668-b8ab96d5a9e5: HEAD https://huggingface.co/freddyaboulton/silero-vad/resolve/main/silero_vad.onnx (authenticated: True)
+[32mINFO[0m:	  Warming up VAD model.
+[32mINFO[0m:	  VAD model warmed up.
+Request 5059c2c5-6228-4995-be27-3daf8421fe07: HEAD https://huggingface.co/api/telemetry/gradio/initiated (authenticated: False)
+INFO:     127.0.0.1:60130 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41288 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34024 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:56677 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:56677 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     172.26.16.1:56678 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:56680 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:56680 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33922 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:56824 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:56824 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:57019 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:57019 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:57019 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:57019 - "GET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1" 404 Not Found
+INFO:     172.26.16.1:57019 - "GET /health HTTP/1.1" 200 OK
+INFO:     172.26.16.1:57019 - "GET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1" 404 Not Found
+INFO:     172.26.16.1:57215 - "OPTIONS /assistant/webrtc/offer HTTP/1.1" 400 Bad Request
+INFO:     172.26.16.1:57217 - "OPTIONS /assistant/webrtc/offer HTTP/1.1" 400 Bad Request
+INFO:     172.26.16.1:57245 - "OPTIONS /assistant/webrtc/offer HTTP/1.1" 400 Bad Request
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77859]
+I0629 19:35:41.626000 77859 torch/_subclasses/fake_tensor.py:2843] FakeTensor cache stats:
+I0629 19:35:41.627000 77859 torch/_subclasses/fake_tensor.py:2844]   cache_hits: 0
+I0629 19:35:41.627000 77859 torch/_subclasses/fake_tensor.py:2845]   cache_misses: 0
