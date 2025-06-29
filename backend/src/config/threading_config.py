@@ -51,7 +51,7 @@ class ThreadingPipelineConfig:
             stt_confidence_threshold=float(os.getenv('THREADING_STT_CONFIDENCE', '0.6')),
             stt_min_audio_length=float(os.getenv('THREADING_STT_MIN_AUDIO', '0.5')),
             llm_min_sentence_length=int(os.getenv('THREADING_LLM_MIN_SENTENCE', '10')),
-            tts_chunk_size=int(os.getenv('THREADING_TTS_CHUNK_SIZE', '1024')),
+            tts_chunk_size=int(os.getenv('THREADING_TTS_CHUNK_SIZE', '512')),
             output_timeout=float(os.getenv('THREADING_OUTPUT_TIMEOUT', '0.05')),
         )
 

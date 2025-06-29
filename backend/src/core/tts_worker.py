@@ -37,7 +37,7 @@ class TTSStreamingWorker(BasePipelineWorker):
         voice_mapper: VoiceMapper,
         voice_assistant,
         processing_timeout: float = 0.1,
-        chunk_size: int = 1024
+        chunk_size: int = 512
     ):
         super().__init__(
             name="TTSWorker",

@@ -71,9 +71,7 @@ class ThreadingCallbackHandler:
         self.tts_worker = None
         self.output_worker = None
         
-        # Audio output management
-        self.output_chunks = []
-        self.output_lock = threading.Lock()
+        # Current generation tracking
         self.current_generation_id = None
         
         # Performance tracking
@@ -112,16 +110,13 @@ class ThreadingCallbackHandler:
             voice_assistant=self.voice_assistant
         )
         
-        self.output_worker = TTSOutputWorker(
-            pipeline_manager=self.pipeline_manager,
-            output_callback=self._handle_audio_output
-        )
+        # Note: TTSOutputWorker not needed - TTS worker puts directly to output queue
+        self.output_worker = None
         
         # Start all workers
         self.stt_worker.start_worker()
         self.llm_worker.start_worker()
         self.tts_worker.start_worker()
-        self.output_worker.start_worker()
         
         # Setup interruption handling
         self.interruption_manager.register_interruption_callback(
@@ -138,7 +133,7 @@ class ThreadingCallbackHandler:
         logger.info("🛑 Stopping threading pipeline")
         
         # Stop workers
-        workers = [self.stt_worker, self.llm_worker, self.tts_worker, self.output_worker]
+        workers = [self.stt_worker, self.llm_worker, self.tts_worker]
         for worker in workers:
             if worker:
                 worker.stop_worker()
@@ -295,17 +290,6 @@ class ThreadingCallbackHandler:
             traceback.print_exc()
             return None, None
             
-    def _handle_audio_output(self, tts_chunk: TTSAudioChunk):
-        """
-        Handle audio output from TTS worker.
-        
-        Args:
-            tts_chunk: TTS audio chunk to handle
-        """
-        with self.output_lock:
-            self.output_chunks.append(tts_chunk)
-            
-        logger.debug(f"📢 Received audio output for generation {tts_chunk.generation_id}")
         
     def _handle_interruption(self):
         """Handle interruption callback."""
@@ -335,6 +319,5 @@ class ThreadingCallbackHandler:
                 "stt": self.stt_worker.get_worker_stats() if self.stt_worker else None,
                 "llm": self.llm_worker.get_worker_stats() if self.llm_worker else None,
                 "tts": self.tts_worker.get_worker_stats() if self.tts_worker else None,
-                "output": self.output_worker.get_worker_stats() if self.output_worker else None,
             }
         }

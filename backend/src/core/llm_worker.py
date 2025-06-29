@@ -245,10 +245,8 @@ class LLMStreamingWorker(BasePipelineWorker):
                 # Create a simple token chunk with the confirmation message
                 return LLMTokenChunk(
                     generation_id=generation_id,
-                    tokens=[confirmation_message],
-                    is_sentence_complete=True,
-                    sentence_text=confirmation_message,
-                    is_final=True
+                    text=confirmation_message,
+                    is_sentence_complete=True
                 )
             
         try:
