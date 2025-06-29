@@ -114,9 +114,13 @@ class ThreadingCallbackHandler:
         self.output_worker = None
         
         # Start all workers
+        print("🧵 DEBUG: Starting STT worker...")
         self.stt_worker.start_worker()
+        print("🧵 DEBUG: Starting LLM worker...")
         self.llm_worker.start_worker()
+        print("🧵 DEBUG: Starting TTS worker...")
         self.tts_worker.start_worker()
+        print("🧵 DEBUG: All workers started!")
         
         # Setup interruption handling
         self.interruption_manager.register_interruption_callback(
@@ -159,6 +163,9 @@ class ThreadingCallbackHandler:
         Yields:
             Tuples of (audio_data, additional_outputs) for streaming back to client
         """
+        # DEBUG: Print to console to ensure we see it
+        print(f"🎤 THREADING CALLBACK INVOKED: {type(audio_data_tuple)}")
+        
         # Interrupt ongoing TTS when user starts speaking
         self.tts_engine.interrupt()
         
@@ -169,12 +176,15 @@ class ThreadingCallbackHandler:
         self.interruption_manager.handle_user_speech_detected()
         
         # DEBUG: Log callback invocation
+        print(f"🎤 THREADING CALLBACK: Processing audio data {self.total_callbacks}")
         logger.debug(f"🎤 CALLBACK INVOKED [{time.time():.3f}]: Processing audio data")
         
         try:
             # Preprocess audio
             audio_array, sample_rate = self._preprocess_audio(audio_data_tuple)
+            print(f"🎤 THREADING: Preprocessed audio: {audio_array.shape if audio_array is not None else None}")
             if audio_array is None:
+                print("🎤 THREADING: Audio preprocessing failed!")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
                 
@@ -182,6 +192,7 @@ class ThreadingCallbackHandler:
             generation_id = self.pipeline_manager.create_generation()
             self.current_generation_id = generation_id
             
+            print(f"🎤 THREADING: Created generation {generation_id}")
             logger.info(f"🎤 Created generation {generation_id} for audio processing")
             
             # Create audio chunk and feed to pipeline
@@ -194,11 +205,14 @@ class ThreadingCallbackHandler:
             )
             
             # Put audio into pipeline
+            print(f"🎤 THREADING: Putting audio chunk into pipeline for generation {generation_id}")
             logger.info(f"🎤 Threading handler putting audio chunk into pipeline for generation {generation_id}")
             if not self.pipeline_manager.put_audio_input(audio_chunk):
+                print(f"🎤 THREADING: Failed to queue audio for generation {generation_id}")
                 logger.error(f"Failed to queue audio for generation {generation_id}")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
+            print(f"🎤 THREADING: Audio chunk queued successfully for generation {generation_id}")
             logger.info(f"✅ Audio chunk queued successfully for generation {generation_id}")
                 
             # Yield audio chunks as they become available

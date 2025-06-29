@@ -8,7 +8,7 @@ Uses async operations within thread event loop for FastRTC compatibility.
 import time
 import asyncio
 import numpy as np
-from typing import Optional
+from typing import Optional, Any
 
 from .pipeline_workers import BasePipelineWorker
 from .pipeline_manager import (
@@ -131,6 +131,8 @@ class STTStreamingWorker(BasePipelineWorker):
         generation_id = audio_chunk.generation_id
         
         # DEBUG: Log audio chunk received
+        print(f"🎤 STT WORKER: Received audio chunk for generation {generation_id}")
+        print(f"🎤 STT WORKER: Audio shape: {audio_chunk.audio_data.shape}, dtype: {audio_chunk.audio_data.dtype}")
         logger.info(f"🎤 STT Worker received audio chunk for generation {generation_id}: "
                    f"{audio_chunk.audio_data.size} samples at {audio_chunk.sample_rate}Hz")
         
@@ -242,17 +244,28 @@ class STTStreamingWorker(BasePipelineWorker):
             Transcription result
         """
         try:
-            # Convert audio data to bytes format expected by STT engine
-            if audio_data.dtype != np.float32:
+            # Ensure audio is 1D mono for faster-whisper
+            if audio_data.ndim > 1:
+                print(f"🎤 STT: Converting {audio_data.shape} to 1D mono")
+                # Take first channel if stereo, or flatten if needed
+                audio_data = audio_data.flatten() if audio_data.shape[0] == 1 else audio_data[0]
+                
+            print(f"🎤 STT: Final audio shape: {audio_data.shape}, dtype: {audio_data.dtype}")
+            
+            # Convert int16 to float32 format expected by STT engine (like voice_assistant.py does)
+            if audio_data.dtype == np.int16:
+                print(f"🎤 STT: Converting int16 to float32 with /32768.0 normalization")
+                audio_data = audio_data.astype(np.float32) / 32768.0
+            elif audio_data.dtype != np.float32:
                 audio_data = audio_data.astype(np.float32)
                 
-            # Normalize if needed
-            if np.max(np.abs(audio_data)) > 1.0:
-                audio_data = audio_data / np.max(np.abs(audio_data))
+            print(f"🎤 STT: Final audio range: [{np.min(audio_data):.3f}, {np.max(audio_data):.3f}]")
             
             # Use existing STT engine async methods
+            print(f"🎤 STT: Starting transcription with {audio_data.shape} audio...")
             if hasattr(self.stt_engine, 'transcribe_audio_async'):
                 # Use async method directly
+                print(f"🎤 STT: Using transcribe_audio_async")
                 result = await self.stt_engine.transcribe_audio_async(audio_data, sample_rate)
             elif hasattr(self.stt_engine, 'process_audio_async'):
                 # Use async process method
@@ -263,9 +276,15 @@ class STTStreamingWorker(BasePipelineWorker):
                 audio_bytes = audio_data.tobytes()
                 result = await asyncio.to_thread(self.stt_engine.process_audio, audio_bytes, sample_rate)
             else:
-                # Final fallback: run any available method in thread pool
-                result = await asyncio.to_thread(self.stt_engine.transcribe, audio_data)
+                # Final fallback: check if transcribe method is async or sync
+                if asyncio.iscoroutinefunction(self.stt_engine.transcribe):
+                    # Async method - await directly
+                    result = await self.stt_engine.transcribe(audio_data)
+                else:
+                    # Sync method - run in thread pool
+                    result = await asyncio.to_thread(self.stt_engine.transcribe, audio_data)
                 
+            print(f"🎤 STT: Transcription completed! Result: {result}")
             return result
             
         except Exception as e:
@@ -295,3 +314,19 @@ class STTStreamingWorker(BasePipelineWorker):
             "buffered_generations": len(self.audio_buffers),
         })
         return stats
+        
+    def process_item(self, audio_chunk) -> Optional[Any]:
+        """
+        Synchronous wrapper for process_item_async.
+        Required by BasePipelineWorker abstract method.
+        
+        Args:
+            audio_chunk: Audio chunk data to process
+            
+        Returns:
+            None - this worker uses async processing
+        """
+        # This method should not be called directly since STTStreamingWorker
+        # overrides the worker loop to use async processing
+        logger.warning("process_item called on STTStreamingWorker - this should use async processing")
+        return None

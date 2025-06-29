@@ -24,6 +24,10 @@ BACKEND_PID=""
 FRONTEND_PID=""
 DOCKER_RUNNING=false
 
+# Command line flag tracking
+CMDLINE_THREADING_PIPELINE=""
+CMDLINE_THREADING_FALLBACK=""
+
 # Logging functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -327,14 +331,18 @@ run_development() {
     
     # Re-apply command line overrides after loading environment files
     # This ensures command line flags take precedence over environment files
-    if [[ "${USE_THREADING_PIPELINE:-false}" == "true" ]]; then
+    echo "DEBUG: CMDLINE_THREADING_PIPELINE=$CMDLINE_THREADING_PIPELINE"
+    echo "DEBUG: Current USE_THREADING_PIPELINE=$USE_THREADING_PIPELINE"
+    if [[ "$CMDLINE_THREADING_PIPELINE" == "true" ]]; then
         export USE_THREADING_PIPELINE=true
+        echo "DEBUG: Set USE_THREADING_PIPELINE=true"
         log_info "Command line override: Threading pipeline enabled"
     fi
-    if [[ "${THREADING_FALLBACK_TO_ASYNC:-true}" == "false" ]]; then
+    if [[ "$CMDLINE_THREADING_FALLBACK" == "false" ]]; then
         export THREADING_FALLBACK_TO_ASYNC=false
         log_info "Command line override: Threading fallback disabled"
     fi
+    echo "DEBUG: Final USE_THREADING_PIPELINE=$USE_THREADING_PIPELINE"
     
     # Check if virtual environment exists and activate it
     if [[ -d "$SCRIPT_DIR/backend/venv" ]]; then
@@ -553,6 +561,8 @@ parse_arguments() {
     local mode=""
     local log_level=""
     
+    # Command line flags are already declared globally
+    
     while [[ $# -gt 0 ]]; do
         case $1 in
             dev|development|docker|prod|production)
@@ -573,10 +583,12 @@ parse_arguments() {
                 fi
                 ;;
             --threading)
+                CMDLINE_THREADING_PIPELINE="true"
                 export USE_THREADING_PIPELINE=true
                 shift
                 ;;
             --no-fallback)
+                CMDLINE_THREADING_FALLBACK="false"
                 export THREADING_FALLBACK_TO_ASYNC=false
                 shift
                 ;;

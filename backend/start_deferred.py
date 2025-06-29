@@ -130,22 +130,48 @@ async def initialize_voice_assistant_deferred(app: FastAPI):
         fastrtc_bridge = FastRTCBridge()
         
         # Create callback handler with debug logging
-        logger.info("🎯 Creating UnifiedCallbackHandler...")
+        logger.info("🎯 Creating callback handler...")
         logger.info(f"🧵 Threading pipeline environment: USE_THREADING_PIPELINE={os.getenv('USE_THREADING_PIPELINE', 'false')}")
         logger.info(f"🔄 Threading fallback environment: THREADING_FALLBACK_TO_ASYNC={os.getenv('THREADING_FALLBACK_TO_ASYNC', 'true')}")
         
-        callback_handler = UnifiedCallbackHandler(
-            voice_assistant=voice_assistant,
-            stt_engine=voice_assistant.stt_engine,
-            tts_engine=voice_assistant.tts_engine,
-            voice_mapper=voice_assistant.voice_mapper,
-            event_loop=async_env_manager.get_event_loop()
-        )
+        # Check if we should use threading directly
+        print(f"🔍 DEBUG: Environment: USE_THREADING_PIPELINE={os.getenv('USE_THREADING_PIPELINE')}")
+        logger.info(f"🔍 Environment: USE_THREADING_PIPELINE={os.getenv('USE_THREADING_PIPELINE')}")
+        from src.config.threading_config import is_threading_enabled
+        threading_enabled = is_threading_enabled()
+        print(f"🔍 DEBUG: is_threading_enabled() = {threading_enabled}")
+        logger.info(f"🔍 is_threading_enabled() = {threading_enabled}")
+        if threading_enabled:
+            print("🧵 DEBUG: Using ThreadingCallbackHandler directly")
+            logger.info("🧵 Using ThreadingCallbackHandler directly")
+            from src.integration.threading_callback_handler import ThreadingCallbackHandler
+            callback_handler = ThreadingCallbackHandler(
+                voice_assistant=voice_assistant,
+                stt_engine=voice_assistant.stt_engine,
+                tts_engine=voice_assistant.tts_engine,
+                voice_mapper=voice_assistant.voice_mapper
+            )
+            print("🧵 DEBUG: Starting threading callback handler...")
+            callback_handler.start()
+            print("🧵 DEBUG: Threading callback handler started!")
+            handler_type = "threading"
+        else:
+            print("🔄 DEBUG: Using UnifiedCallbackHandler")
+            logger.info("🔄 Using UnifiedCallbackHandler")
+            callback_handler = UnifiedCallbackHandler(
+                voice_assistant=voice_assistant,
+                stt_engine=voice_assistant.stt_engine,
+                tts_engine=voice_assistant.tts_engine,
+                voice_mapper=voice_assistant.voice_mapper,
+                event_loop=async_env_manager.get_event_loop()
+            )
+            handler_type = "unified"
         
         # Log which handler was actually initialized
-        handler_stats = callback_handler.get_handler_stats()
-        logger.info(f"✅ UnifiedCallbackHandler initialized with: {handler_stats.get('handler_type', 'unknown')} handler")
-        logger.info(f"📊 Handler stats: {handler_stats}")
+        logger.info(f"✅ Callback handler initialized with: {handler_type} handler")
+        if hasattr(callback_handler, 'get_handler_stats'):
+            handler_stats = callback_handler.get_handler_stats()
+            logger.info(f"📊 Handler stats: {handler_stats}")
         
         # Create FastRTC stream with proper network configuration
         logger.info("Creating FastRTC stream...")
