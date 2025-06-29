@@ -145,7 +145,14 @@ class VoiceAssistant:
         logger.info(f"🔧 Setting up memory manager for user: {self.user_id}")
         # Set up dummy OpenAI key for local use
         os.environ["OPENAI_API_KEY"] = "dummy-key-for-local-use"
-        return AMemMemoryManager(self.user_id)
+        # --- START FIX ---
+        # Use the loaded configuration to initialize the memory manager
+        return AMemMemoryManager(
+            user_id=self.user_id,
+            amem_model=self.config.memory.embedder_model,
+            llm_model=self.config.memory.llm_model
+        )
+        # --- END FIX ---
     
     def _log_configuration(self):
         """Log the current system configuration."""
@@ -304,29 +311,81 @@ class VoiceAssistant:
         auth_result = self.voice_print_manager.process_text(user_text)
         logger.debug(f"🔍 Authentication result: {auth_result} (current user: {self.user_id})")
         
-        # Handle new authentication result format
-        identified_user_id = None
-        if auth_result and auth_result.get('action') == 'user_identified':
-            identified_user_id = auth_result.get('user_id')
-        
-        if identified_user_id and identified_user_id != self.user_id:
-            logger.info(f"🔄 User identification detected: switching from '{self.user_id}' to '{identified_user_id}'")
+        # Handle authentication results
+        if auth_result:
+            action = auth_result.get('action')
             
-            # Extract username for display
-            username = identified_user_id.replace("user_", "")
+            if action == 'user_identified':
+                identified_user_id = auth_result.get('user_id')
+                if identified_user_id and identified_user_id != self.user_id:
+                    logger.info(f"🔄 User identification detected: switching from '{self.user_id}' to '{identified_user_id}'")
+                    
+                    # Extract username for display
+                    username = identified_user_id.replace("user_", "")
+                    
+                    # Switch memory manager to new user first
+                    if self.memory_manager.switch_user(identified_user_id):
+                        logger.info(f"✅ Memory manager switched to user: {identified_user_id}")
+                        
+                        # Refresh session with new authenticated user
+                        self.refresh_session_after_auth(identified_user_id, username)
+                        
+                        # Return a confirmation message for user identification
+                        return f"Hello {username}! I've switched to your personal memory profile and started a fresh session."
+                    else:
+                        logger.error(f"❌ Failed to switch memory manager to user: {identified_user_id}")
+                        return "I recognized you, but there was an issue accessing your personal profile. Let me try to help anyway."
             
-            # Switch memory manager to new user first
-            if self.memory_manager.switch_user(identified_user_id):
-                logger.info(f"✅ Memory manager switched to user: {identified_user_id}")
+            elif action == 'registration_success':
+                # New user registered and logged in
+                identified_user_id = auth_result['user_id']
+                username = identified_user_id.replace("user_", "")
                 
-                # Refresh session with new authenticated user
-                self.refresh_session_after_auth(identified_user_id, username)
-                
-                # Return a confirmation message for user identification
-                return f"Hello {username}! I've switched to your personal memory profile and started a fresh session."
-            else:
-                logger.error(f"❌ Failed to switch memory manager to user: {identified_user_id}")
-                return "I recognized you, but there was an issue accessing your personal profile. Let me try to help anyway."
+                if self.memory_manager.switch_user(identified_user_id):
+                    logger.info(f"✅ New user registered: {identified_user_id}")
+                    
+                    # Refresh session with new registered user
+                    self.refresh_session_after_auth(identified_user_id, username)
+                    
+                    return f"Welcome {username}! Your account has been created and I'll remember our conversations in your new session."
+                else:
+                    logger.error(f"❌ Failed to switch memory manager for new user: {identified_user_id}")
+                    return "Your account was created, but there was an issue setting up your memory profile."
+            
+            elif action == 'username_request':
+                return auth_result.get('message', 'What would you like your username to be?')
+            
+            elif action == 'pin_request_registration':
+                username = auth_result.get('username', 'user')
+                return auth_result.get('message', f"Great! Now please provide a 4-digit PIN for {username}.")
+            
+            elif action == 'pin_request':
+                username = auth_result['username']
+                return f"Hello {username}! Please provide your 4-digit PIN to access your profile."
+            
+            elif action == 'suggest_registration':
+                username = auth_result.get('username', 'unknown')
+                return auth_result.get('message', f"I don't know you yet, {username}. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN.")
+            
+            elif action == 'login_cancelled':
+                username = auth_result.get('username', 'someone')
+                return f"No problem, {username}. I'll continue with the temporary session."
+            
+            elif action == 'registration_cancelled':
+                username = auth_result.get('username', 'someone')
+                return f"No problem, {username}. Registration cancelled. I'll continue with the temporary session."
+            
+            elif action == 'auth_failed':
+                reason = auth_result.get('reason', 'unknown')
+                if reason == 'invalid_pin':
+                    return "Sorry, that PIN is incorrect. Please try again or say 'cancel' to stop."
+                elif reason == 'user_not_found':
+                    username = auth_result.get('username', 'unknown')
+                    return f"I don't have a user named '{username}'. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN."
+                elif reason == 'invalid_username':
+                    return "That username isn't valid. Please choose a different name."
+                else:
+                    return "Authentication failed. Please try again."
         
         # Check cache first
         cached_response = self.get_cached_response(user_text) # In VoiceAssistant
@@ -353,10 +412,7 @@ class VoiceAssistant:
         if turns:
             session_turns_text = "\n".join([f"User: {turn.user}\nAssistant: {turn.assistant}" for turn in turns[-3:]]) # Assuming turn is ConversationTurn object
             if session_turns_text:
-                session_context = f"""
-
-Recent exchanges in this session:
-{session_turns_text}"""
+                session_context = f"\n\nRecent exchanges in this session:\n{session_turns_text}"
             logger.debug(f"Session Context for LLM: {session_context}")
 
         # Combine contexts (A-MEM context should ideally be part of the system prompt in LLMService,
@@ -1118,3 +1174,5 @@ Recent exchanges in this session:
             f"language='{self.current_language}', "
             f"turns={self.turn_count})"
         )
+    
+   

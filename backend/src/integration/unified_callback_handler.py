@@ -86,6 +86,7 @@ class UnifiedCallbackHandler:
             self.handler_type = "threading"
             
             logger.info("✅ Threading handler initialized and started")
+            logger.info(f"🔍 THREADING HANDLER TYPE: {type(self.threading_handler).__name__}")
             
         except Exception as e:
             logger.error(f"Failed to initialize threading handler: {e}")
@@ -141,6 +142,7 @@ class UnifiedCallbackHandler:
         """
         # DEBUG: Log that callback was invoked
         logger.info(f"🎤 UNIFIED CALLBACK INVOKED: handler_type={self.handler_type}, audio_data_type={type(audio_data_tuple)}")
+        logger.info(f"🔍 UNIFIED: Active handler = {type(self.active_handler).__name__}")
         
         if not self.active_handler:
             logger.error("No active handler available")

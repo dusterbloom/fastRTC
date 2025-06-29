@@ -43,7 +43,7 @@ class AudioData:
     def __post_init__(self):
         """Validate audio data consistency."""
         expected_samples = int(self.sample_rate * self.duration)
-        actual_samples = len(self.samples)
+        actual_samples = self.samples.size if hasattr(self.samples, 'size') else len(self.samples)
         
         # Allow small discrepancies due to rounding
         if abs(expected_samples - actual_samples) > self.sample_rate * 0.1:  # 100ms tolerance

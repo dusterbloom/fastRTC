@@ -8,6 +8,7 @@ Handles dependency injection, component initialization, and application lifecycl
 import sys
 import signal
 import asyncio
+import time
 from typing import Optional
 
 from .voice_assistant import VoiceAssistant
@@ -78,6 +79,23 @@ class VoiceAssistantApplication:
             
             # Get the event loop for callback handler
             event_loop = self.async_env_manager.get_event_loop()
+            
+            # CRITICAL FIX: Ensure voice assistant is fully initialized before creating callback handler
+            logger.info("🔍 Verifying voice assistant initialization...")
+            max_wait = 10.0
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait:
+                if (hasattr(self.voice_assistant, 'llm_service') and 
+                    hasattr(self.voice_assistant.llm_service, 'http_session') and
+                    self.voice_assistant.llm_service.http_session is not None):
+                    logger.info("✅ Voice assistant LLM service properly initialized")
+                    break
+                logger.info("⏳ Waiting for voice assistant initialization...")
+                time.sleep(0.5)
+            else:
+                logger.error("❌ Voice assistant initialization timeout")
+                return False
             
             # Initialize unified callback handler
             logger.info("🎤 Creating unified callback handler...")

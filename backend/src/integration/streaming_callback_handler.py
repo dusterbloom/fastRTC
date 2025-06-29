@@ -98,8 +98,8 @@ class StreamingPipeline:
             else:
                 logger.info(f"🎤 USER: '{user_text}'")
             
-            # Stream LLM→TTS pipeline
-            async for audio_chunk in self._stream_llm_to_tts(user_text):
+            # Stream LLM→TTS pipeline (pass audio for voice enrollment)
+            async for audio_chunk in self._stream_llm_to_tts(user_text, audio_array):
                 yield audio_chunk
             
             # Log total processing time
@@ -122,19 +122,25 @@ class StreamingPipeline:
             Transcription result or None
         """
         try:
-            # Use existing STT engine but with immediate processing
-            result = await self.stt_engine._transcribe_audio(audio_array)
+            # Get UI-selected language and convert to Whisper format for STT
+            from ..config.language_config import get_whisper_language
+            ui_language_kokoro = self.voice_assistant.current_language
+            ui_language_whisper = get_whisper_language(ui_language_kokoro)
+            
+            # Use existing STT engine but with UI-selected language
+            result = await self.stt_engine._transcribe_audio(audio_array, ui_language_whisper)
             return result
         except Exception as e:
             logger.error(f"❌ STT streaming error: {e}")
             return None
     
-    async def _stream_llm_to_tts(self, user_text: str) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
+    async def _stream_llm_to_tts(self, user_text: str, audio_array: np.ndarray = None) -> AsyncGenerator[Tuple[Tuple[int, np.ndarray], AdditionalOutputs], None]:
         """
         Stream LLM response directly to TTS as tokens arrive.
         
         Args:
             user_text: User input text
+            audio_array: Original audio data for voice enrollment
             
         Yields:
             Audio chunks from streaming TTS
@@ -153,8 +159,24 @@ class StreamingPipeline:
             logger.info(f"🔍 [STREAMING] Starting authentication check for text: '{user_text[:100]}...'")
             
             try:
-                auth_result = self.voice_assistant.voice_print_manager.process_text(user_text)
-                logger.info(f"🔍 [STREAMING] Authentication result: {auth_result}")
+                # CRITICAL FIX: Handle voice enrollment processing
+                if hasattr(self.voice_assistant, 'voice_print_manager'):
+                    voice_manager = self.voice_assistant.voice_print_manager
+                    
+                    # If we're in enrollment mode and have audio, process the voice sample
+                    if voice_manager.enrollment_mode and audio_array is not None and len(audio_array) > 0:
+                        logger.info(f"🎤 [STREAMING] Processing voice sample for enrollment (size: {len(audio_array)})")
+                        # Process the voice sample directly
+                        auth_result = voice_manager.add_voice_sample(audio_array)
+                        logger.info(f"🔍 [STREAMING] Voice sample result: {auth_result}")
+                    else:
+                        # Regular text processing for authentication/enrollment initiation
+                        if audio_array is not None and len(audio_array) > 0:
+                            voice_manager.set_audio_buffer(audio_array)
+                        auth_result = voice_manager.process_text(user_text)
+                        logger.info(f"🔍 [STREAMING] Authentication result: {auth_result}")
+                else:
+                    auth_result = None
             except Exception as auth_error:
                 logger.error(f"❌ [STREAMING] Authentication error: {auth_error}")
                 import traceback
@@ -191,6 +213,15 @@ class StreamingPipeline:
                     username = auth_result['username']
                     confirmation_message = f"Hello {username}! Please provide your 4-digit PIN to access your profile."
                     
+                elif action == 'username_request':
+                    # Echo register initiated, asking for username
+                    confirmation_message = auth_result.get('message', 'What would you like your username to be?')
+                    
+                elif action == 'pin_request_registration':
+                    # Username provided, asking for PIN during registration
+                    username = auth_result.get('username', 'user')
+                    confirmation_message = auth_result.get('message', f"Great! Now please provide a 4-digit PIN for {username}.")
+                    
                 elif action == 'registration_success':
                     # New user registered and logged in
                     identified_user_id = auth_result['user_id']
@@ -212,10 +243,43 @@ class StreamingPipeline:
                     username = auth_result.get('username', 'someone')
                     confirmation_message = f"No problem, {username}. I'll continue with the temporary session."
                 
+                elif action == 'registration_cancelled':
+                    # User cancelled registration
+                    username = auth_result.get('username', 'someone')
+                    confirmation_message = f"No problem, {username}. Registration cancelled. I'll continue with the temporary session."
+                
                 elif action == 'suggest_registration':
                     # User identified but not registered
                     username = auth_result.get('username', 'unknown')
                     confirmation_message = auth_result.get('message', f"I don't know you yet, {username}. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN.")
+                
+                elif action == 'voice_enrollment_started':
+                    # Voice enrollment initiated
+                    user_id = auth_result.get('user_id', 'unknown')
+                    phrase = auth_result.get('phrase', 'The quick brown fox jumps over the lazy dog')
+                    sample_num = auth_result.get('sample', 1)
+                    total_samples = auth_result.get('total_samples', 2)
+                    confirmation_message = f"Great! I'll register your voice. Please say this phrase clearly: '{phrase}'. This is sample {sample_num} of {total_samples}."
+                
+                elif action == 'voice_sample_received':
+                    # Voice sample received, need more
+                    sample_num = auth_result.get('sample', 2)
+                    total_samples = auth_result.get('total_samples', 2)
+                    confirmation_message = f"Perfect! Now say the same phrase one more time. This is sample {sample_num} of {total_samples}."
+                
+                elif action == 'voice_enrollment_complete':
+                    # Voice enrollment completed successfully
+                    user_id = auth_result.get('user_id', 'unknown')  # Should be 'user_1234567890'
+                    username = user_id.replace('user_', '')  # Extract just the timestamp
+                    
+                    # Switch to the new voice user (user_id is already in correct format)
+                    if self.voice_assistant.memory_manager.switch_user(user_id):
+                        logger.info(f"✅ [STREAMING] Voice user registered and switched: {user_id}")
+                        self.voice_assistant.refresh_session_after_auth(user_id, f"Voice User {username}")
+                        confirmation_message = f"Excellent! Your voice is now registered. Just say 'it's me' anytime to authenticate instantly. Welcome to your personalized session!"
+                    else:
+                        logger.error(f"❌ [STREAMING] Failed to switch to voice user: {user_id}")
+                        confirmation_message = "Your voice was registered, but there was an issue setting up your session."
                 
                 elif action == 'auth_failed':
                     # Authentication failed

@@ -10,7 +10,7 @@ Solution: Deferred initialization with background task execution
 from __future__ import annotations
 
 import os
-os.environ['STT_BACKEND'] = 'faster'
+os.environ['STT_BACKEND'] = 'faster_gpu'
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 import sys
@@ -141,6 +141,8 @@ async def initialize_voice_assistant_deferred(app: FastAPI):
         handler_stats = callback_handler.get_handler_stats()
         logger.info(f"✅ UnifiedCallbackHandler initialized with: {handler_stats.get('handler_type', 'unknown')} handler")
         logger.info(f"📊 Handler stats: {handler_stats}")
+        print(f"🎯 HANDLER TYPE: {handler_stats.get('handler_type', 'unknown')}")
+        print(f"🎯 HANDLER STATS: {handler_stats}")
         
         # Create FastRTC stream with proper network configuration
         logger.info("Creating FastRTC stream...")

@@ -219,8 +219,15 @@ class StreamCallbackHandler:
         # and is designed to handle Hugging Face pipeline parameters.
         # No need for audio_bytes conversion here as transcribe_with_sample_rate takes array.
         try:
+            # Get UI-selected language and convert to Whisper format for STT
+            from src.config.language_config import get_whisper_language
+            ui_language_kokoro = self.voice_assistant.current_language
+            ui_language_whisper = get_whisper_language(ui_language_kokoro)
+            
+            print(f"[STT] Using UI-selected language: Kokoro='{ui_language_kokoro}' -> Whisper='{ui_language_whisper}'")
+            
             transcription_result = run_coro_from_sync_thread_with_timeout(
-                self.stt_engine._transcribe_audio(audio_array),
+                self.stt_engine._transcribe_audio(audio_array, ui_language_whisper),
                 timeout=8.0, # Consistent with start_original_backup.py
                 event_loop=self.event_loop
             )

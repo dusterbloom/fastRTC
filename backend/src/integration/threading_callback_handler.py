@@ -174,20 +174,69 @@ class ThreadingCallbackHandler:
         self.interruption_manager.handle_user_speech_detected()
         
         # DEBUG: Log callback invocation
-        logger.debug(f"🎤 CALLBACK INVOKED [{time.time():.3f}]: Processing audio data")
+        logger.info(f"🎤 THREADING CALLBACK INVOKED [{time.time():.3f}]: Processing audio data")
+        print(f"🎤 THREADING CALLBACK INVOKED [{time.time():.3f}]: Processing audio data")
+        print(f"🔍 Audio data type: {type(audio_data_tuple)}, length: {len(audio_data_tuple) if hasattr(audio_data_tuple, '__len__') else 'N/A'}")
         
         try:
             # Preprocess audio
+            print(f"🔍 Raw audio_data_tuple: {type(audio_data_tuple)}, content: {audio_data_tuple if len(str(audio_data_tuple)) < 200 else str(audio_data_tuple)[:200] + '...'}")
             audio_array, sample_rate = self._preprocess_audio(audio_data_tuple)
+            print(f"🔍 Processed audio_array: type={type(audio_array)}, shape={getattr(audio_array, 'shape', 'no shape')}, size={getattr(audio_array, 'size', len(audio_array) if audio_array is not None else 'None')}")
             if audio_array is None:
+                print("❌ Audio array is None, yielding empty")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
+            
+            # CRITICAL FIX: Set audio buffer for voice authentication
+            print(f"🔍 Checking voice_print_manager: hasattr={hasattr(self.voice_assistant, 'voice_print_manager')}")
+            if hasattr(self.voice_assistant, 'voice_print_manager'):
+                print(f"🔍 voice_print_manager exists: {self.voice_assistant.voice_print_manager is not None}")
+            
+            if hasattr(self.voice_assistant, 'voice_print_manager') and self.voice_assistant.voice_print_manager:
+                # Flatten audio array if needed for voice authentication
+                if len(audio_array.shape) > 1:
+                    flattened_audio = audio_array.flatten()
+                    print(f"🔧 Flattened audio from {audio_array.shape} to {flattened_audio.shape}")
+                else:
+                    flattened_audio = audio_array
+                
+                # Check if audio contains actual speech (not just silence)
+                audio_max = abs(flattened_audio).max() if len(flattened_audio) > 0 else 0
+                audio_rms = (flattened_audio ** 2).mean() ** 0.5 if len(flattened_audio) > 0 else 0
+                print(f"🔊 Audio analysis: max={audio_max:.6f}, rms={audio_rms:.6f}, non_zero_samples={(flattened_audio != 0).sum()}")
+                
+                self.voice_assistant.voice_print_manager.set_audio_buffer(flattened_audio)
+                print(f"✅ [THREADING] Audio buffer set for voice authentication (size: {len(flattened_audio)})")
+                print(f"🔍 [THREADING] Voice auth enabled: {self.voice_assistant.voice_print_manager.enable_voice_auth}")
+                print(f"🔍 [THREADING] Voice manager available: {self.voice_assistant.voice_print_manager.voice_manager is not None}")
+                logger.info(f"🎤 [THREADING] Audio buffer set for voice authentication (size: {len(flattened_audio)})")
+                logger.info(f"🔍 [THREADING] Voice auth enabled: {self.voice_assistant.voice_print_manager.enable_voice_auth}")
+                logger.info(f"🔍 [THREADING] Voice manager available: {self.voice_assistant.voice_print_manager.voice_manager is not None}")
+            else:
+                print(f"❌ [THREADING] voice_print_manager not available or disabled")
+                logger.warning(f"❌ [THREADING] voice_print_manager not available or disabled")
                 
             # Create new generation
             generation_id = self.pipeline_manager.create_generation()
             self.current_generation_id = generation_id
             
+            print(f"🎯 Created generation {generation_id} for audio processing")
             logger.info(f"🎤 Created generation {generation_id} for audio processing")
+            
+            # CRITICAL DEBUG: Analyze audio before creating chunk
+            print(f"🔍 [THREADING HANDLER] Audio analysis before creating chunk:")
+            print(f"  - Type: {type(audio_array)}")
+            print(f"  - Shape: {audio_array.shape}")
+            print(f"  - Size: {audio_array.size}")
+            print(f"  - Dtype: {audio_array.dtype}")
+            print(f"  - Min: {audio_array.min():.6f}")
+            print(f"  - Max: {audio_array.max():.6f}")
+            print(f"  - Mean: {audio_array.mean():.6f}")
+            print(f"  - RMS: {(audio_array ** 2).mean() ** 0.5:.6f}")
+            print(f"  - Non-zero samples: {(audio_array != 0).sum()}")
+            print(f"  - Sample rate: {sample_rate}")
+            print(f"  - Duration: {audio_array.size / sample_rate:.3f}s")
             
             # Create audio chunk and feed to pipeline
             audio_chunk = AudioChunk(
@@ -198,12 +247,26 @@ class ThreadingCallbackHandler:
                 is_final=True  # For now, treat each callback as complete audio
             )
             
+            # CRITICAL DEBUG: Verify chunk creation didn't corrupt data
+            print(f"🔍 [THREADING HANDLER] Audio chunk verification after creation:")
+            print(f"  - Chunk audio type: {type(audio_chunk.audio_data)}")
+            print(f"  - Chunk audio shape: {audio_chunk.audio_data.shape}")
+            print(f"  - Chunk audio size: {audio_chunk.audio_data.size}")
+            print(f"  - Chunk audio dtype: {audio_chunk.audio_data.dtype}")
+            print(f"  - Chunk audio min: {audio_chunk.audio_data.min():.6f}")
+            print(f"  - Chunk audio max: {audio_chunk.audio_data.max():.6f}")
+            print(f"  - Chunk audio RMS: {(audio_chunk.audio_data ** 2).mean() ** 0.5:.6f}")
+            print(f"  - Chunk sample rate: {audio_chunk.sample_rate}")
+            
             # Put audio into pipeline
+            print(f"🎤 Threading handler putting audio chunk into pipeline for generation {generation_id}")
             logger.info(f"🎤 Threading handler putting audio chunk into pipeline for generation {generation_id}")
             if not self.pipeline_manager.put_audio_input(audio_chunk):
+                print(f"❌ Failed to queue audio for generation {generation_id}")
                 logger.error(f"Failed to queue audio for generation {generation_id}")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
                 return
+            print(f"✅ Audio chunk queued successfully for generation {generation_id}")
             logger.info(f"✅ Audio chunk queued successfully for generation {generation_id}")
                 
             # Yield audio chunks as they become available
@@ -217,6 +280,15 @@ class ThreadingCallbackHandler:
                 if state and state.interrupted.is_set():
                     logger.info(f"Generation {generation_id} was interrupted")
                     break
+                
+                # DEBUG: Log pipeline state every 2 seconds
+                elapsed = time.time() - timeout_start
+                if int(elapsed) % 2 == 0 and elapsed > 1:
+                    logger.info(f"🔍 [DEBUG] Generation {generation_id} waiting {elapsed:.1f}s - State: {state.status if state else 'None'}")
+                    if state:
+                        logger.info(f"🔍 [DEBUG] STT: {'✅' if state.stt_complete.is_set() else '⏳'}, "
+                                   f"LLM: {'✅' if state.llm_started.is_set() else '⏳'}, "
+                                   f"TTS: {'✅' if state.tts_started.is_set() else '⏳'}")
                     
                 # Get available output chunks
                 output_chunk = self.pipeline_manager.get_output_audio(timeout=0.1)
@@ -245,7 +317,16 @@ class ThreadingCallbackHandler:
                     
             # If no chunks were yielded, return empty
             if yielded_chunks == 0:
-                logger.warning(f"No audio chunks yielded for generation {generation_id}")
+                elapsed = time.time() - timeout_start
+                if elapsed >= max_wait_time:
+                    logger.error(f"⏰ TIMEOUT: Generation {generation_id} timed out after {elapsed:.1f}s")
+                    if state:
+                        logger.error(f"⏰ Final state - STT: {'✅' if state.stt_complete.is_set() else '❌'}, "
+                                   f"LLM: {'✅' if state.llm_started.is_set() else '❌'}, "
+                                   f"TTS: {'✅' if state.tts_started.is_set() else '❌'}, "
+                                   f"Status: {state.status}")
+                else:
+                    logger.warning(f"No audio chunks yielded for generation {generation_id} (waited {elapsed:.1f}s)")
                 yield EMPTY_AUDIO_YIELD_OUTPUT
             else:
                 self.successful_callbacks += 1
@@ -256,6 +337,8 @@ class ThreadingCallbackHandler:
             
         except Exception as e:
             logger.error(f"❌ Error in audio stream processing: {e}")
+            import traceback
+            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
             yield EMPTY_AUDIO_YIELD_OUTPUT
             
     def _preprocess_audio(self, audio_data_tuple: tuple) -> Tuple[np.ndarray, int]:

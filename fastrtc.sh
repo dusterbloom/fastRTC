@@ -331,9 +331,8 @@ run_development() {
         export USE_THREADING_PIPELINE=true
         log_info "Command line override: Threading pipeline enabled"
     fi
-    if [[ "${THREADING_FALLBACK_TO_ASYNC:-true}" == "false" ]]; then
-        export THREADING_FALLBACK_TO_ASYNC=false
-        log_info "Command line override: Threading fallback disabled"
+    if [[ \"${THREADING_FALLBACK_TO_ASYNC:-true}\" == \"false\" ]]; then
+        log_info \"Command line override: Threading fallback disabled\"
     fi
     
     # Check if virtual environment exists and activate it

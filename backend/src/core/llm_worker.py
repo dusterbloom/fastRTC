@@ -156,14 +156,30 @@ class LLMStreamingWorker(BasePipelineWorker):
         
         # Check for authentication/user identification
         logger.info(f"🔍 [LLM_WORKER] Starting authentication check for text: '{user_text[:100]}...'")
+        logger.info(f"🔍 [LLM_WORKER] Voice assistant type: {type(self.voice_assistant)}")
+        logger.info(f"🔍 [LLM_WORKER] Has voice_print_manager: {hasattr(self.voice_assistant, 'voice_print_manager')}")
         
         auth_result = None
         try:
             if hasattr(self.voice_assistant, 'voice_print_manager') and self.voice_assistant.voice_print_manager:
-                auth_result = self.voice_assistant.voice_print_manager.process_text(user_text)
-                logger.info(f"🔍 [LLM_WORKER] Authentication result: {auth_result}")
+                voice_manager = self.voice_assistant.voice_print_manager
+                logger.info(f"🔍 [LLM_WORKER] Processing text for voice auth: '{user_text[:50]}...'")
+                logger.info(f"🔍 [LLM_WORKER] Audio buffer available: {voice_manager.audio_buffer is not None}")
+                logger.info(f"🔍 [LLM_WORKER] Enrollment mode: {voice_manager.enrollment_mode}")
+                
+                # If we're in enrollment mode and have audio, process the voice sample
+                if voice_manager.enrollment_mode and hasattr(voice_manager, 'audio_buffer') and voice_manager.audio_buffer is not None:
+                    logger.info(f"🎤 [LLM_WORKER] Processing voice sample for enrollment (size: {len(voice_manager.audio_buffer)})")
+                    # Process the voice sample directly
+                    auth_result = voice_manager.add_voice_sample(voice_manager.audio_buffer)
+                    logger.info(f"🔍 [LLM_WORKER] Voice sample result: {auth_result}")
+                else:
+                    # Regular text processing for authentication/enrollment initiation
+                    auth_result = voice_manager.process_text(user_text)
+                    logger.info(f"🔍 [LLM_WORKER] Authentication result: {auth_result}")
             else:
-                logger.warning(f"❌ [LLM_WORKER] voice_print_manager not available")
+                logger.info(f"🔍 [LLM_WORKER] voice_print_manager not available - proceeding with normal LLM processing")
+                auth_result = None
         except Exception as auth_error:
             logger.error(f"❌ [LLM_WORKER] Authentication error: {auth_error}")
             import traceback
@@ -200,6 +216,15 @@ class LLMStreamingWorker(BasePipelineWorker):
                 username = auth_result['username']
                 confirmation_message = f"Hello {username}! Please provide your 4-digit PIN to access your profile."
                 
+            elif action == 'username_request':
+                # Echo register initiated, asking for username
+                confirmation_message = auth_result.get('message', 'What would you like your username to be?')
+                
+            elif action == 'pin_request_registration':
+                # Username provided, asking for PIN during registration
+                username = auth_result.get('username', 'user')
+                confirmation_message = auth_result.get('message', f"Great! Now please provide a 4-digit PIN for {username}.")
+                
             elif action == 'registration_success':
                 # New user registered and logged in
                 identified_user_id = auth_result['user_id']
@@ -226,6 +251,39 @@ class LLMStreamingWorker(BasePipelineWorker):
                 username = auth_result.get('username', 'someone')
                 confirmation_message = f"No problem, {username}. I'll continue with the temporary session."
             
+            elif action == 'registration_cancelled':
+                # User cancelled registration
+                username = auth_result.get('username', 'someone')
+                confirmation_message = f"No problem, {username}. Registration cancelled. I'll continue with the temporary session."
+            
+            elif action == 'voice_enrollment_started':
+                # Voice enrollment initiated
+                user_id = auth_result.get('user_id', 'unknown')
+                phrase = auth_result.get('phrase', 'The quick brown fox jumps over the lazy dog')
+                sample_num = auth_result.get('sample', 1)
+                total_samples = auth_result.get('total_samples', 2)
+                confirmation_message = f"Great! I'll register your voice. Please say this phrase clearly: '{phrase}'. This is sample {sample_num} of {total_samples}."
+            
+            elif action == 'voice_sample_received':
+                # Voice sample received, need more
+                sample_num = auth_result.get('sample', 2)
+                total_samples = auth_result.get('total_samples', 2)
+                confirmation_message = f"Perfect! Now say the same phrase one more time. This is sample {sample_num} of {total_samples}."
+            
+            elif action == 'voice_enrollment_complete':
+                # Voice enrollment completed successfully
+                user_id = auth_result.get('user_id', 'unknown')  # Should be 'user_1234567890'
+                username = user_id.replace('user_', '')  # Extract just the timestamp
+                
+                # Switch to the new voice user (user_id is already in correct format)
+                if self.voice_assistant.memory_manager.switch_user(user_id):
+                    logger.info(f"✅ [LLM_WORKER] Voice user registered and switched: {user_id}")
+                    self.voice_assistant.refresh_session_after_auth(user_id, f"Voice User {username}")
+                    confirmation_message = f"Excellent! Your voice is now registered. Just say 'it's me' anytime to authenticate instantly. Welcome to your personalized session!"
+                else:
+                    logger.error(f"❌ [LLM_WORKER] Failed to switch to voice user: {user_id}")
+                    confirmation_message = "Your voice was registered, but there was an issue setting up your session."
+            
             elif action == 'auth_failed':
                 # Authentication failed
                 reason = auth_result.get('reason', 'unknown')
@@ -236,6 +294,10 @@ class LLMStreamingWorker(BasePipelineWorker):
                     confirmation_message = f"I don't have a user named '{username}'. Would you like to register? Say 'register as {username} PIN 1234' with your chosen 4-digit PIN."
                 elif reason == 'invalid_username':
                     confirmation_message = "That username isn't valid. Please choose a different name."
+                elif reason == 'voice_not_recognized':
+                    confirmation_message = auth_result.get('message', "I don't recognize your voice. Say 'register my voice' to enroll.")
+                elif reason == 'no_audio':
+                    confirmation_message = auth_result.get('message', "Please try speaking again.")
                 else:
                     confirmation_message = "Authentication failed. Please try again."
             
@@ -251,6 +313,9 @@ class LLMStreamingWorker(BasePipelineWorker):
                     is_final=True
                 )
             
+        # Proceed with normal LLM processing (no auth required)
+        logger.info(f"🧠 [LLM_WORKER] No authentication action required - proceeding with normal LLM processing")
+        
         try:
             logger.info(f"🧠 [LLM_WORKER] Starting LLM processing for generation {generation_id}: '{user_text}'")
             

@@ -132,3 +132,28 @@ def get_supported_languages() -> List[str]:
         List[str]: List of supported language codes
     """
     return list(WHISPER_TO_KOKORO_LANG.keys())
+
+
+def get_whisper_language(kokoro_lang: str) -> str:
+    """Convert Kokoro language code back to Whisper language code.
+    
+    Args:
+        kokoro_lang: Kokoro language code (e.g., 'a', 'i', 'e')
+        
+    Returns:
+        str: Corresponding Whisper language code, defaults to 'en'
+    """
+    # Explicit mapping from Kokoro to primary Whisper language
+    # This avoids the issue with multiple Whisper languages mapping to same Kokoro code
+    kokoro_to_whisper = {
+        'a': 'en',  # American English
+        'b': 'en',  # British English -> use 'en' for Whisper
+        'i': 'it',  # Italian
+        'e': 'es',  # Spanish
+        'f': 'fr',  # French
+        'p': 'pt',  # Portuguese
+        'j': 'ja',  # Japanese
+        'z': 'zh',  # Chinese
+        'h': 'hi',  # Hindi
+    }
+    return kokoro_to_whisper.get(kokoro_lang, 'en')

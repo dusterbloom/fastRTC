@@ -255,10 +255,28 @@ class AudioPipelineManager:
     def put_audio_input(self, audio_chunk: AudioChunk, timeout: float = 1.0) -> bool:
         """Put audio chunk into input queue."""
         try:
+            # CRITICAL DEBUG: Analyze audio chunk before queuing
+            print(f"🔍 [PIPELINE MANAGER] Audio chunk analysis before queuing:")
+            print(f"  - Generation ID: {audio_chunk.generation_id}")
+            print(f"  - Audio type: {type(audio_chunk.audio_data)}")
+            print(f"  - Audio shape: {audio_chunk.audio_data.shape}")
+            print(f"  - Audio size: {audio_chunk.audio_data.size}")
+            print(f"  - Audio dtype: {audio_chunk.audio_data.dtype}")
+            print(f"  - Audio min: {audio_chunk.audio_data.min():.6f}")
+            print(f"  - Audio max: {audio_chunk.audio_data.max():.6f}")
+            print(f"  - Audio RMS: {(audio_chunk.audio_data ** 2).mean() ** 0.5:.6f}")
+            print(f"  - Sample rate: {audio_chunk.sample_rate}")
+            print(f"  - Queue size before: {self.audio_input_queue.qsize()}")
+            
+            logger.info(f"🔄 Putting audio chunk into queue: generation_id={audio_chunk.generation_id}, queue_size={self.audio_input_queue.qsize()}")
             self.audio_input_queue.put(audio_chunk, timeout=timeout)
+            logger.info(f"✅ Audio chunk queued successfully, new queue_size={self.audio_input_queue.qsize()}")
+            
+            print(f"  - Queue size after: {self.audio_input_queue.qsize()}")
             return True
         except Exception as e:
-            logger.error(f"Failed to queue audio input: {e}")
+            logger.error(f"❌ Failed to queue audio input: {e}")
+            print(f"❌ [PIPELINE MANAGER] Failed to queue audio input: {e}")
             return False
             
     def get_output_audio(self, timeout: float = 0.1) -> Optional[TTSAudioChunk]:

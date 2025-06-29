@@ -9,7 +9,7 @@ import numpy as np
 from typing import Tuple
 
 # STT Backend configuration
-STT_BACKEND = os.environ.get('STT_BACKEND', 'huggingface').lower()
+STT_BACKEND = os.environ.get('STT_BACKEND', 'faster_gpu').lower()
 
 # Audio configuration constants (extracted from original)
 AUDIO_SAMPLE_RATE = 16000

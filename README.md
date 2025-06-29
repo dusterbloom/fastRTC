@@ -19,14 +19,37 @@ FastRTC now features a unified deployment script that handles all modes with a s
 EXTERNAL_IP=your.server.ip ./fastrtc.sh prod
 ```
 
+## ⚠️ Important: CUDA Dependency Management
+
+**FastRTC uses PyTorch, CTranslate2, and Resemblyzer which can conflict if not properly managed.**
+
+- ✅ **Use the provided setup script** to avoid dependency hell
+- ✅ **Validate your environment** before development  
+- ✅ **Use async pipeline** if threading pipeline fails
+- ❌ **Don't manually install CUDA packages** without version pinning
+
+See `CUDA_DEPENDENCY_HELL_PREVENTION_GUIDE.md` for details.
+
 ### Installation
 
+#### Prerequisites
+- **Windows 11 with WSL2** (recommended)
+- **NVIDIA RTX 3090** or compatible GPU
+- **Latest NVIDIA drivers** (525.xx+)
+- **Python 3.10+**
+
+#### Quick Setup
 ```bash
 git clone https://github.com/your-repo/fastRTC
 cd fastRTC
-chmod +x fastrtc.sh
 
-# Start local development
+# Automated environment setup (prevents CUDA dependency hell)
+./setup_dev_env.sh
+
+# Validate environment
+python validate_environment.py
+
+# Start development
 ./fastrtc.sh dev
 ```
 

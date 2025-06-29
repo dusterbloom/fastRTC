@@ -15,7 +15,7 @@ class ThreadingPipelineConfig:
     """Configuration for threading-based pipeline."""
     
     # Feature flags
-    enabled: bool = False
+    enabled: bool = True
     fallback_to_async: bool = True  # Fallback to async pipeline if threading fails
     
     # Performance settings

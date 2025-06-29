@@ -24,8 +24,29 @@ class OllamaEmbeddingFunction:
     def __init__(self, model_name: str = "nomic-embed-text:latest"):
         self.model_name = model_name
         self._name = f"ollama_{model_name.replace(':', '_').replace('-', '_')}"  # ChromaDB compatibility
-        logger.info(f"🚀 Initialized OllamaEmbeddingFunction with model: {model_name}")
+        
+        # --- START FIX ---
+        # Dynamically determine the embedding dimension
+        self.embedding_dimension = self._get_embedding_dimension()
+        logger.info(f"🚀 Initialized OllamaEmbeddingFunction with model: {model_name} (dimension: {self.embedding_dimension})")
+        # --- END FIX ---
     
+    # --- START NEW METHOD ---
+    def _get_embedding_dimension(self) -> int:
+        """Determines the embedding dimension by making a sample call to Ollama."""
+        try:
+            # Generate a sample embedding to find its length
+            response = ollama.embeddings(model=self.model_name, prompt="test")
+            if 'embedding' in response and isinstance(response['embedding'], list):
+                return len(response['embedding'])
+            else:
+                logger.warning("Could not determine embedding dimension from Ollama. Falling back to default.")
+                return 768  # Fallback to a common dimension
+        except Exception as e:
+            logger.error(f"Error determining embedding dimension for model '{self.model_name}': {e}. Falling back to default.")
+            return 768 # Fallback
+    # --- END NEW METHOD ---
+
     def name(self):
         """Return the name of the embedding function (required by ChromaDB)."""
         return self._name
@@ -38,7 +59,10 @@ class OllamaEmbeddingFunction:
                 # Ensure text is a string and not empty
                 if not isinstance(text, str) or not text.strip():
                     logger.warning(f"⚠️ Empty or non-string input: {repr(text)}")
-                    embeddings.append([0.0] * 768)  # nomic-embed-text dimension
+                    # --- START FIX ---
+                    # Use the dynamically determined dimension for the zero vector
+                    embeddings.append([0.0] * self.embedding_dimension)
+                    # --- END FIX ---
                     continue
                 
                 response = ollama.embeddings(model=self.model_name, prompt=text.strip())
@@ -47,15 +71,19 @@ class OllamaEmbeddingFunction:
                     logger.debug(f"✅ Generated embedding for text: {text[:30]}...")
                 else:
                     logger.error(f"❌ No embedding in Ollama response for text: {text[:50]}...")
-                    embeddings.append([0.0] * 768)  # nomic-embed-text dimension
+                    # --- START FIX ---
+                    embeddings.append([0.0] * self.embedding_dimension)
+                    # --- END FIX ---
             except Exception as e:
                 error_msg = str(e)
                 if "cannot decode batches" in error_msg:
                     logger.warning(f"⚠️ Ollama batch decode error for text: {text[:50]}... This is a known Ollama issue")
                 else:
                     logger.error(f"❌ Ollama embedding failed for text: {text[:50]}... Error: {e}")
-                # Fallback: return zero vector with correct dimension for nomic-embed-text
-                embeddings.append([0.0] * 768)
+                # --- START FIX ---
+                # Fallback: return zero vector with correct dimension
+                embeddings.append([0.0] * self.embedding_dimension)
+                # --- END FIX ---
         
         logger.info(f"🚀 Generated {len(embeddings)} embeddings")
         return embeddings
