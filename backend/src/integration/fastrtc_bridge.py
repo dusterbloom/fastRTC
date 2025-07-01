@@ -8,11 +8,48 @@ Extracted from the original voice assistant implementation.
 import os
 import logging
 from typing import Optional, Dict, Any, Callable
-from fastrtc import Stream, ReplyOnPause, AlgoOptions, SileroVadOptions
+from fastrtc import Stream, StreamHandler
 
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+class WhisperLiveStreamHandler(StreamHandler):
+    """
+    StreamHandler that wraps the callback function for WhisperLive VAD mode.
+    
+    This handler simply forwards audio to the callback function without any VAD processing,
+    since WhisperLive handles VAD directly.
+    """
+    
+    def __init__(self, callback_function: Callable):
+        """Initialize with the callback function."""
+        self.callback_function = callback_function
+        logger.debug("🎤 WhisperLiveStreamHandler initialized")
+    
+    def receive(self, audio_data_tuple):
+        """Receive audio and forward to callback function."""
+        logger.debug(f"🎤 WhisperLiveStreamHandler received audio: {type(audio_data_tuple)}")
+        
+        # Forward to callback function and yield results
+        try:
+            for result in self.callback_function(audio_data_tuple):
+                yield result
+        except Exception as e:
+            logger.error(f"Error in WhisperLiveStreamHandler callback: {e}")
+            # Yield empty audio to maintain connection
+            yield ((16000, b""), None)
+    
+    def copy(self):
+        """Create a copy of this handler."""
+        return WhisperLiveStreamHandler(self.callback_function)
+    
+    def emit(self, frame):
+        """Emit audio frame (required by StreamHandler interface)."""
+        # This method is typically used for sending audio back to client
+        # For our WhisperLive setup, we handle this in the callback
+        return frame
 
 
 class FastRTCBridge:
@@ -69,26 +106,14 @@ class FastRTCBridge:
                 for result in callback_function(audio_data_tuple):
                     yield result
             
-            # Create stream with ReplyOnPause for voice activity detection
-            logger.debug("🌐 Creating ReplyOnPause with callback...")
+            # Create WhisperLive stream handler (no VAD - handled by WhisperLive)
+            logger.debug("🌐 Creating WhisperLiveStreamHandler (VAD disabled - handled by WhisperLive)...")
+            stream_handler = WhisperLiveStreamHandler(debug_callback_wrapper)
+            
+            # Create stream with WhisperLive handler
+            logger.debug("🌐 Creating Stream with WhisperLiveStreamHandler...")
             self.stream = Stream(
-                ReplyOnPause(
-                    debug_callback_wrapper,
-                    can_interrupt=True,
-                    algo_options=AlgoOptions(
-                        # This is the GATEKEEPER. We are making it extremely sensitive.
-                        speech_threshold=0.2,  # Much more sensitive: will detect even quiet speech
-                        started_talking_threshold=0.05,  # Even more sensitive for speech start detection
-                        audio_chunk_duration=1.0 # Smaller chunks for faster response
-                    ),
-                    model_options=SileroVadOptions(
-                        # This is the TIMER. Updated for faster interruption support.
-                        threshold=0.15,                 # More sensitive model threshold for better detection
-                        min_speech_duration_ms=250,     # Reduced to catch shorter utterances
-                        min_silence_duration_ms=1200,   # MUCH FASTER: Reduced from 3000ms to 1200ms for quicker response
-                        speech_pad_ms=250              # Generous buffer at the end of your speech
-                    )
-                ),
+                stream_handler,  # Use proper StreamHandler
                 modality="audio",
                 mode="send-receive",
                 track_constraints=self._get_audio_constraints()

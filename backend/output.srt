@@ -1,0 +1,4 @@
+1
+00:00:08,192 --> 00:00:10,192
+ Hi there, can you hear me when I speak?
+

@@ -8,12 +8,14 @@ Uses async operations within thread event loop for FastRTC compatibility.
 import time
 import asyncio
 import re
+from queue import Empty
 from typing import Optional, AsyncGenerator, Any
 
 from .pipeline_workers import BasePipelineWorker
 from .pipeline_manager import (
     AudioPipelineManager, TranscriptionChunk, LLMTokenChunk, GenerationStatus
 )
+from ..services.sync_llm_service import SyncLLMService
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +35,7 @@ class LLMStreamingWorker(BasePipelineWorker):
         voice_assistant,
         min_sentence_length: int = 10,  # minimum chars for sentence
         sentence_endings: tuple = ('.', '!', '?', '...'),
-        processing_timeout: float = 0.1
+        processing_timeout: float = 1.0
     ):
         super().__init__(
             name="LLMWorker", 
@@ -47,49 +49,90 @@ class LLMStreamingWorker(BasePipelineWorker):
         self.min_sentence_length = min_sentence_length
         self.sentence_endings = sentence_endings
         
+        # Initialize synchronous LLM service for threading pipeline
+        self.sync_llm_service = SyncLLMService()
+        
         # Log that LLM worker is being used
-        logger.info("🧠 [LLM_WORKER] LLM Worker initialized - authentication enabled")
+        logger.info("🧠 [LLM_WORKER] LLM Worker initialized with SyncLLMService")
         
         # Token buffering for sentence completion
         self.token_buffers = {}  # generation_id -> accumulated tokens
         
-        # Event loop for async operations in this thread
-        self.loop = None
-        
         logger.info("🧠 LLMStreamingWorker initialized")
     
     def run(self):
-        """Main worker thread loop with async event loop."""
-        # Create event loop for this thread
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        
-        logger.info(f"✅ Worker {self.name} started with async event loop")
+        """Main worker thread loop using standard threading (no async event loop)."""
+        logger.info(f"✅ Worker {self.name} started with standard threading")
         
         try:
-            # Run the async worker loop
-            self.loop.run_until_complete(self._async_worker_loop())
+            # Use the standard threading-based worker loop from base class
+            while not self.stop_requested and not self.pipeline_manager.stop_event.is_set():
+                try:
+                    # Get item from input queue
+                    logger.debug(f"🧠 [LLM_WORKER] Waiting for item from queue (current size: {self.input_queue.qsize()})...")
+                    item = self.input_queue.get(timeout=self.processing_timeout)
+                    print(f"🧠 [LLM_WORKER] Got item from queue: {type(item)} - {getattr(item, 'text', '')[:50]}... (queue size now: {self.input_queue.qsize()})")
+                    logger.info(f"🧠 [LLM_WORKER] Got item from queue: {type(item)} - {getattr(item, 'text', '')[:50]}... (queue size now: {self.input_queue.qsize()})")
+                    
+                    # Check if generation is still active
+                    if hasattr(item, 'generation_id'):
+                        state = self.pipeline_manager.get_generation_state(item.generation_id)
+                        if not state or state.interrupted.is_set():
+                            logger.debug(f"Skipping processing for interrupted generation {item.generation_id}")
+                            continue
+                    
+                    # Process the item synchronously (no async)
+                    start_time = time.time()
+                    try:
+                        result = self.process_item(item)
+                        processing_time = time.time() - start_time
+                        
+                        self.processed_items += 1
+                        self.total_processing_time += processing_time
+                        
+                        # Send result to output queue if successful
+                        if result is not None and self.output_queue is not None:
+                            print(f"🧠 [LLM_WORKER] Putting result to output queue: '{result.text[:50]}...'")
+                            self.output_queue.put(result)
+                            print(f"🧠 [LLM_WORKER] Output queue size now: {self.output_queue.qsize()}")
+                        else:
+                            print(f"🧠 [LLM_WORKER] NOT putting to output queue: result={result is not None}, output_queue={self.output_queue is not None}")
+                            
+                    except Exception as e:
+                        self.failed_items += 1
+                        self.handle_processing_error(item, e)
+                        
+                except Empty:
+                    # Timeout is normal, continue checking
+                    logger.debug(f"🧠 [LLM_WORKER] Queue timeout, queue size: {self.input_queue.qsize()}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Unexpected error in worker {self.name}: {e}")
+                    
         except Exception as e:
             logger.error(f"Fatal error in worker {self.name}: {e}")
         finally:
-            if self.loop and not self.loop.is_closed():
-                self.loop.close()
             logger.info(f"🏁 Worker {self.name} stopped")
             
     async def _async_worker_loop(self):
         """Async worker loop that processes items from queue."""
+        logger.info(f"🧠 [LLM_WORKER] Starting async worker loop, queue: {self.input_queue}")
         while not self.stop_requested and not self.pipeline_manager.stop_event.is_set():
             try:
                 # Get item from input queue (with timeout)
                 try:
                     # Use asyncio timeout for queue get
+                    logger.debug(f"🧠 [LLM_WORKER] Waiting for item from queue...")
                     item = await asyncio.wait_for(
                         asyncio.to_thread(self.input_queue.get, timeout=self.processing_timeout),
                         timeout=self.processing_timeout + 0.1
                     )
+                    logger.info(f"🧠 [LLM_WORKER] Got item from queue: {type(item)} - {getattr(item, 'text', '')[:50]}...")
                 except asyncio.TimeoutError:
+                    logger.debug(f"🧠 [LLM_WORKER] Queue timeout, checking again...")
                     continue
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"🧠 [LLM_WORKER] Queue get exception: {e}")
                     continue
                 
                 # Check if generation is still active
@@ -464,21 +507,68 @@ class LLMStreamingWorker(BasePipelineWorker):
         if hasattr(item, 'generation_id'):
             self.cleanup_buffers(item.generation_id)
             
-    def process_item(self, transcription_chunk) -> Optional[Any]:
+    def process_item(self, transcription_chunk) -> Optional[LLMTokenChunk]:
         """
-        Synchronous wrapper for process_item_async.
-        Required by BasePipelineWorker abstract method.
+        Process transcription through LLM synchronously.
         
         Args:
             transcription_chunk: Transcription data to process
             
         Returns:
-            None - this worker uses async processing
+            LLMTokenChunk with response, or None if no response
         """
-        # This method should not be called directly since LLMStreamingWorker
-        # overrides the worker loop to use async processing
-        logger.warning("process_item called on LLMStreamingWorker - this should use async processing")
-        return None
+        logger.info(f"🧠 [LLM_WORKER] process_item called with transcription: {transcription_chunk.text[:50]}...")
+        generation_id = transcription_chunk.generation_id
+        
+        # Skip partial transcriptions
+        if transcription_chunk.is_partial:
+            logger.debug(f"Skipping partial transcription for generation {generation_id}")
+            return None
+            
+        # Update generation state
+        state = self.pipeline_manager.get_generation_state(generation_id)
+        if not state:
+            logger.warning(f"No state found for generation {generation_id}")
+            return None
+            
+        if state.llm_start_time is None:
+            state.llm_start_time = time.time()
+            state.status = GenerationStatus.LLM_STREAMING
+            state.llm_started.set()
+            
+        user_text = transcription_chunk.text.strip()
+        if not user_text:
+            logger.debug(f"Empty transcription for generation {generation_id}")
+            return None
+        
+        try:
+            logger.info(f"🧠 [LLM_WORKER] Starting LLM processing for generation {generation_id}: '{user_text}'")
+            
+            # Use synchronous LLM service to call Ollama directly
+            print(f"🧠 [LLM_WORKER] Calling SyncLLMService for: '{user_text}'")
+            logger.info(f"🧠 [LLM_WORKER] Calling SyncLLMService for: '{user_text}'")
+            response = self.sync_llm_service.get_response(user_text, context="")
+            print(f"🧠 [LLM_WORKER] Got Ollama response: '{response[:100]}...'")
+            logger.info(f"🧠 [LLM_WORKER] Got Ollama response: '{response[:100]}...'")
+            
+            # Log LLM service stats
+            stats = self.sync_llm_service.get_stats()
+            logger.debug(f"🧠 [LLM_WORKER] SyncLLMService stats: {stats}")
+            
+            # Update conversation state
+            state.response_text = response
+            
+            # Create response chunk
+            return LLMTokenChunk(
+                generation_id=generation_id,
+                text=response,
+                is_sentence_complete=True
+            )
+            
+        except Exception as e:
+            logger.error(f"LLM processing error for generation {generation_id}: {e}")
+            state.mark_failed(f"LLM error: {e}")
+            return None
         
     def get_worker_stats(self) -> dict:
         """Get LLM worker statistics."""

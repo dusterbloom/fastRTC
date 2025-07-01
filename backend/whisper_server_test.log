@@ -1,0 +1,11 @@
+INFO:root:Single model mode currently only works with custom models.
+Traceback (most recent call last):
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/run_whisper_server.py", line 84, in <module>
+    server.run(
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/venv/lib/python3.10/site-packages/whisper_live/server.py", line 393, in run
+    with serve(
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/venv/lib/python3.10/site-packages/websockets/sync/server.py", line 504, in serve
+    sock = socket.create_server((host, port), **kwargs)
+  File "/usr/lib/python3.10/socket.py", line 927, in create_server
+    raise error(err.errno, msg) from None
+OSError: [Errno 98] Address already in use (while attempting to bind on address ('0.0.0.0', 9090))

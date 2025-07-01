@@ -27,6 +27,7 @@ def parse_early_args():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--threading', action='store_true')
     parser.add_argument('--no-fallback', action='store_true')
+    parser.add_argument('--whisper-live', action='store_true')
     args, _ = parser.parse_known_args()
     
     if args.threading:
@@ -37,9 +38,19 @@ def parse_early_args():
         os.environ['THREADING_FALLBACK_TO_ASYNC'] = 'false'
         print(f"🚫 Threading fallback disabled via command line")
     
+    if args.whisper_live:
+        os.environ['USE_WHISPER_LIVE'] = 'true'
+        os.environ['STT_BACKEND'] = 'whisper_live'
+        print(f"🎤 WhisperLive STT backend enabled via command line")
+    
     # Enable GPU acceleration for Kokoro TTS
     os.environ['ONNX_PROVIDER'] = 'CUDAExecutionProvider'
     print(f"🚀 GPU acceleration enabled for Kokoro TTS")
+    
+    # Check for WhisperLive configuration
+    if os.environ.get('USE_WHISPER_LIVE', 'false').lower() == 'true':
+        os.environ['STT_BACKEND'] = 'whisper_live'
+        print(f"🎤 WhisperLive STT backend enabled")
     
     return args
 
@@ -73,6 +84,8 @@ def parse_args():
                        help='Enable threading pipeline (experimental)')
     parser.add_argument('--no-fallback', action='store_true',
                        help='Disable fallback to async pipeline')
+    parser.add_argument('--whisper-live', action='store_true',
+                       help='Enable WhisperLive STT backend (requires threading)')
     return parser.parse_args()
 
 # Initial setup - read log level from environment (command line args parsed in main)
@@ -149,7 +162,8 @@ async def initialize_voice_assistant_deferred(app: FastAPI):
                 voice_assistant=voice_assistant,
                 stt_engine=voice_assistant.stt_engine,
                 tts_engine=voice_assistant.tts_engine,
-                voice_mapper=voice_assistant.voice_mapper
+                voice_mapper=voice_assistant.voice_mapper,
+                event_loop=async_env_manager.get_event_loop()
             )
             print("🧵 DEBUG: Starting threading callback handler...")
             callback_handler.start()
@@ -252,6 +266,17 @@ async def startup_event():
     _initialization_task = asyncio.create_task(initialize_voice_assistant_deferred(app))
     logger.critical("🔥 [STARTUP] Background task created, voice assistant initializing...")
     logger.info("🚀 Server started, voice assistant initializing in background...")
+    
+    # Set WhisperLive API callback handler reference after initialization
+    async def setup_whisperlive():
+        if _initialization_task:
+            await _initialization_task
+        if components.callback_handler:
+            set_callback_handler(components.callback_handler)
+            logger.info("✅ WhisperLive API callback handler set")
+    
+    # Create another background task for WhisperLive setup
+    asyncio.create_task(setup_whisperlive())
 
 @app.get("/")
 async def root():
@@ -427,6 +452,11 @@ async def get_supported_languages():
             status_code=500,
             detail=f"Failed to get supported languages: {str(e)}"
         )
+
+# WhisperLive API routes
+from src.api.whisperlive import router as whisperlive_router, set_callback_handler
+app.include_router(whisperlive_router)
+
 
 # Optional: serve frontend
 _frontend_dist = Path(__file__).parent / "frontend" / "dist"

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/run_whisper_server.py", line 74, in <module>
+    from whisper_live.server import TranscriptionServer
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/venv/lib/python3.10/site-packages/whisper_live/server.py", line 13, in <module>
+    from whisper_live.vad import VoiceActivityDetector
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/venv/lib/python3.10/site-packages/whisper_live/vad.py", line 5, in <module>
+    import onnxruntime
+  File "/mnt/c/Users/PC/Dev/fastRTC/backend/venv/lib/python3.10/site-packages/onnxruntime/__init__.py", line 54, in <module>
+    from onnxruntime.capi import onnxruntime_validation
+ImportError: cannot import name 'onnxruntime_validation' from 'onnxruntime.capi' (unknown location)

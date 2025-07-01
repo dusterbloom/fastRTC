@@ -1,0 +1,8 @@
+INFO:root:Single model mode currently only works with custom models.
+INFO:websockets.server:connection open
+INFO:root:New client connected
+INFO:root:Using Device=cuda with precision float16
+INFO:root:Running faster_whisper backend.
+INFO:faster_whisper:Processing audio with duration 00:01.024
+INFO:root:Cleaning up.
+INFO:root:Exiting speech to text thread

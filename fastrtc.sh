@@ -66,6 +66,7 @@ OPTIONS:
     --log-level LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)
     --threading          Enable threading pipeline (experimental)
     --no-fallback        Disable fallback to async pipeline
+    --whisper-live       Use WhisperLive STT backend (requires threading)
     --help, -h           Show this help message
 
 EXAMPLES:
@@ -73,6 +74,7 @@ EXAMPLES:
     ./fastrtc.sh dev --log-level INFO          # Development with INFO logging
     ./fastrtc.sh dev --threading               # Development with threading pipeline
     ./fastrtc.sh dev --threading --no-fallback # Threading without async fallback
+    ./fastrtc.sh dev --threading --whisper-live # Threading with WhisperLive STT
     ./fastrtc.sh docker                        # Start Docker services
     EXTERNAL_IP=1.2.3.4 ./fastrtc.sh prod     # Production with external IP
     OLLAMA_URL=http://custom:11434 ./fastrtc.sh dev  # Custom service URL
@@ -200,6 +202,15 @@ USE_THREADING_PIPELINE=false
 THREADING_FALLBACK_TO_ASYNC=true
 THREADING_MAX_QUEUE_SIZE=100
 
+# WhisperLive STT settings (requires threading)
+USE_WHISPER_LIVE=false
+WHISPER_LIVE_HOST=localhost
+WHISPER_LIVE_PORT=9090
+WHISPER_LIVE_MODEL=small
+WHISPER_LIVE_LANGUAGE=en
+WHISPER_LIVE_BACKEND=faster_whisper
+WHISPER_LIVE_AUTO_START=true
+
 # Add any custom environment variables below
 EOF
             log_success "Created $env_file with default values"
@@ -310,6 +321,12 @@ cleanup() {
         wait "$FRONTEND_PID" 2>/dev/null || true
     fi
     
+    if [[ -n "$WHISPERLIVE_PID" ]]; then
+        log_info "Stopping WhisperLive server (PID: $WHISPERLIVE_PID)"
+        kill "$WHISPERLIVE_PID" 2>/dev/null || true
+        wait "$WHISPERLIVE_PID" 2>/dev/null || true
+    fi
+    
     # Stop Docker if running
     if [[ "$DOCKER_RUNNING" == "true" ]]; then
         log_info "Stopping Docker services..."
@@ -361,6 +378,7 @@ run_development() {
             cd "$SCRIPT_DIR/backend"
             pip install -r requirements.txt
             pip install --no-deps fastrtc[vad,stt,tts]==0.0.28 
+            pip install --no-deps whisper-live
             cd "$SCRIPT_DIR"
             log_success "Requirements installed"
         fi
@@ -376,6 +394,73 @@ run_development() {
         log_success "Virtual environment created and requirements installed"
     fi
     
+    # Start WhisperLive server if enabled
+    if [[ "${USE_WHISPER_LIVE:-false}" == "true" ]]; then
+        WHISPERLIVE_PORT=${WHISPER_LIVE_PORT:-9090}
+        if ! lsof -i:$WHISPERLIVE_PORT > /dev/null 2>&1; then
+            log_info "Starting WhisperLive server on port $WHISPERLIVE_PORT..."
+            log_info "Debug: FASTER_WHISPER_MODEL_PATH='$FASTER_WHISPER_MODEL_PATH'"
+            
+            # Check if model path exists
+            if [[ -z "$FASTER_WHISPER_MODEL_PATH" ]]; then
+                log_error "FASTER_WHISPER_MODEL_PATH not set - WhisperLive server may fail"
+            elif [[ ! -d "$FASTER_WHISPER_MODEL_PATH" ]]; then
+                log_error "FASTER_WHISPER_MODEL_PATH directory does not exist: $FASTER_WHISPER_MODEL_PATH"
+            else
+                log_info "Using model path: $FASTER_WHISPER_MODEL_PATH"
+            fi
+            
+            cd "$SCRIPT_DIR/backend"
+            # Create startup script for WhisperLive server
+            cat > start_whisper_live.sh << EOF
+#!/bin/bash
+source venv/bin/activate
+python3 run_whisper_server.py --port $WHISPERLIVE_PORT --backend faster_whisper --faster_whisper_custom_model_path '$FASTER_WHISPER_MODEL_PATH' --no_single_model
+EOF
+            chmod +x start_whisper_live.sh
+            nohup ./start_whisper_live.sh > whisperlive.log 2>&1 &
+            WHISPERLIVE_PID=$!
+            cd "$SCRIPT_DIR"
+            
+            # Wait for WhisperLive server to start
+            log_step "Waiting for WhisperLive server to be ready..."
+            local attempt=0
+            while [[ $attempt -lt 60 ]]; do  # Increased timeout to 60 seconds
+                # Check if process is still running
+                if ! kill -0 $WHISPERLIVE_PID 2>/dev/null; then
+                    log_error "WhisperLive server process died (PID: $WHISPERLIVE_PID)"
+                    if [[ -s "$SCRIPT_DIR/backend/whisperlive.log" ]]; then
+                        log_error "Last few lines of log:"
+                        tail -10 "$SCRIPT_DIR/backend/whisperlive.log"
+                    else
+                        log_error "Log file is empty - server crashed before logging"
+                    fi
+                    exit 1
+                fi
+                
+                # Check if port is bound
+                if lsof -i:$WHISPERLIVE_PORT > /dev/null 2>&1; then
+                    log_success "WhisperLive server is ready!"
+                    break
+                fi
+                echo -n "."
+                sleep 1
+                ((attempt++))
+            done
+            
+            if [[ $attempt -eq 60 ]]; then
+                log_error "WhisperLive server failed to start within 60 seconds"
+                if [[ -s "$SCRIPT_DIR/backend/whisperlive.log" ]]; then
+                    log_error "Last few lines of log:"
+                    tail -10 "$SCRIPT_DIR/backend/whisperlive.log"
+                fi
+                exit 1
+            fi
+        else
+            log_info "WhisperLive server already running on port $WHISPERLIVE_PORT"
+        fi
+    fi
+
     # Start backend
     log_info "Starting backend server..."
     cd "$SCRIPT_DIR/backend"
@@ -386,6 +471,10 @@ run_development() {
         cmd="$cmd --threading"
         log_info "Threading pipeline enabled"
     fi
+    if [[ "${USE_WHISPER_LIVE:-false}" == "true" ]]; then
+        cmd="$cmd --whisper-live"
+        log_info "WhisperLive STT enabled"
+    fi
     if [[ "${THREADING_FALLBACK_TO_ASYNC:-true}" == "false" ]]; then
         cmd="$cmd --no-fallback"
         log_info "Threading fallback disabled"
@@ -394,6 +483,7 @@ run_development() {
     # Debug: Show environment variable values
     log_info "Debug: USE_THREADING_PIPELINE=${USE_THREADING_PIPELINE:-false}"
     log_info "Debug: THREADING_FALLBACK_TO_ASYNC=${THREADING_FALLBACK_TO_ASYNC:-false}"
+    log_info "Debug: USE_WHISPER_LIVE=${USE_WHISPER_LIVE:-false}"
     
     log_info "Starting backend with: $cmd"
     $cmd &
@@ -590,6 +680,12 @@ parse_arguments() {
             --no-fallback)
                 CMDLINE_THREADING_FALLBACK="false"
                 export THREADING_FALLBACK_TO_ASYNC=false
+                shift
+                ;;
+            --whisper-live)
+                export USE_WHISPER_LIVE=true
+                export USE_THREADING_PIPELINE=true  # WhisperLive requires threading
+                CMDLINE_THREADING_PIPELINE="true"
                 shift
                 ;;
             -h|--help|help)

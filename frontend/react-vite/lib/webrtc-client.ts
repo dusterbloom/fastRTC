@@ -49,6 +49,101 @@ export class WebRTCClient {
         }
     }
 
+    async connectOutputOnly() {
+        try {
+            // Configure ICE servers
+            const iceServers = [];
+            
+            // Add STUN servers (testing without TURN for now)
+            if (process.env.NEXT_PUBLIC_STUN_SERVERS) {
+                iceServers.push({ urls: process.env.NEXT_PUBLIC_STUN_SERVERS });
+            }
+            // Add fallback STUN server
+            iceServers.push({ urls: 'stun:stun.l.google.com:19302' });
+            
+            console.log('ICE servers configured:', iceServers);
+            
+            this.peerConnection = new RTCPeerConnection({
+                iceServers: iceServers
+            });
+            
+            // No microphone capture for WhisperLive mode - audio output only
+            console.log('🎤 WhisperLive mode: Skipping microphone capture');
+            
+            this.peerConnection.addEventListener('track', (event) => {
+                console.log('🎵 WebRTC track event received:', event);
+                console.log('🎵 Track kind:', event.track.kind);
+                console.log('🎵 Track readyState:', event.track.readyState);
+                console.log('🎵 Streams:', event.streams);
+                
+                if (this.options.onAudioStream) {
+                    const stream = event.streams[0];
+                    console.log('🎵 Calling onAudioStream with stream:', stream);
+                    
+                    // If we have an audio output device specified and the browser supports setSinkId
+                    if (this.currentOutputDeviceId && 'setSinkId' in HTMLAudioElement.prototype) {
+                        // We'll let the callback handle this, as we need access to the audio element
+                        this.options.audioOutputDeviceId = this.currentOutputDeviceId;
+                    }
+                    
+                    this.options.onAudioStream(stream);
+                }
+            });
+            
+            this.dataChannel = this.peerConnection.createDataChannel('text');
+            
+            this.dataChannel.addEventListener('message', (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    console.log('Received message:', message);
+                    
+                    if (this.options.onMessage) {
+                        this.options.onMessage(message);
+                    }
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            });
+            
+            // Create and send offer for output-only mode
+            console.log('🤝 Creating WebRTC offer (output-only mode)...');
+            const offer = await this.peerConnection.createOffer();
+            await this.peerConnection.setLocalDescription(offer);
+            console.log('🤝 Local description set, sending offer to backend...');
+            
+            // Use same-origin request to avoid CORS preflight
+            const response = await fetch(process.env.NEXT_PUBLIC_WEBRTC_API_URL || 'http://localhost:8000/assistant/webrtc/offer', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                mode: 'cors', // Explicitly set CORS mode
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    sdp: offer.sdp,
+                    type: offer.type,
+                    webrtc_id: Math.random().toString(36).substring(7),
+                    whisperlive_mode: true // Indicate this is WhisperLive mode
+                })
+            });
+            
+            console.log('🤝 Backend response status:', response.status);
+            const serverResponse = await response.json();
+            console.log('🤝 Backend response data:', serverResponse);
+            await this.peerConnection.setRemoteDescription(serverResponse);
+            console.log('🤝 Remote description set, WebRTC connection established (output-only)');
+            
+            if (this.options.onConnected) {
+                this.options.onConnected();
+            }
+        } catch (error) {
+            console.error('Error connecting (output-only):', error);
+            this.disconnect();
+            throw error;
+        }
+    }
+
     async connect() {
         try {
             // Configure ICE servers

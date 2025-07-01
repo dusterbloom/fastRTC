@@ -1,6 +1,7 @@
 """Faster-whisper STT engine implementation."""
 
 import asyncio
+import threading
 from pathlib import Path
 import numpy as np
 from faster_whisper import WhisperModel
@@ -75,6 +76,9 @@ class FasterWhisperSTT(BaseSTTEngine):
                 if "de" not in self.model.hf_tokenizer.lang_to_id:
                     logger.warning("Model may not be multilingual")
             
+            # Add threading lock for model access
+            self._model_lock = threading.Lock()
+            
             self._set_available(True)
             logger.info(f"Initialized FasterWhisperSTT with model at {model_path}")
             
@@ -103,15 +107,20 @@ class FasterWhisperSTT(BaseSTTEngine):
         if audio_samples.dtype != np.float32:
             audio_samples = audio_samples.astype(np.float32)
         
-        # Run transcription in thread pool (faster-whisper is sync)
+        # Run transcription in thread pool (faster-whisper is sync) with model lock
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None, 
-            self._transcribe_sync, 
+            self._transcribe_sync_with_lock, 
             audio_samples
         )
         
         return result
+
+    def _transcribe_sync_with_lock(self, audio_samples: np.ndarray) -> TranscriptionResult:
+        """Thread-safe wrapper for transcription."""
+        with self._model_lock:
+            return self._transcribe_sync(audio_samples)
 
     def _transcribe_sync(self, audio_samples: np.ndarray) -> TranscriptionResult:
         """Synchronous transcription method.
@@ -122,21 +131,70 @@ class FasterWhisperSTT(BaseSTTEngine):
         Returns:
             TranscriptionResult: Transcription result
         """
+        # Try multiple parameter combinations to force segment generation
+        print(f"🎤 FASTER-WHISPER: Attempting transcription with adjusted parameters...")
+        
         segments, info = self.model.transcribe(
             audio_samples,
-            vad_filter=True,      # built-in Silero VAD
-            beam_size=1,          # Greedy search for speed
+            vad_filter=False,     # Disable - FastRTC already has SileroVAD 
+            beam_size=5,          # Increased beam size for better results
             language=None,        # Auto-detect language
-            temperature=0.0,      # Deterministic
-            word_timestamps=False # Disable for speed
+            temperature=0.2,      # Allow some variation to capture weak speech
+            word_timestamps=False, # Disable for speed
+            condition_on_previous_text=False,  # Don't rely on context
+            no_speech_threshold=0.1,  # Lower threshold for speech detection
+            logprob_threshold=-1.5    # Lower threshold for accepting segments
         )
         
-        # Collect all segments
-        text_parts = []
-        for segment in segments:
-            text_parts.append(segment.text.strip())
-        
-        full_text = " ".join(text_parts)
+        # DEBUG: Force generator consumption and check segments
+        print(f"🎤 FASTER-WHISPER: Converting segments generator to list...")
+        try:
+            segments_list = list(segments)  # Force consumption of generator
+            print(f"🎤 FASTER-WHISPER: Got {len(segments_list)} segments from generator")
+            
+            # Collect all segments
+            text_parts = []
+            for i, segment in enumerate(segments_list):
+                segment_text = segment.text.strip()
+                print(f"🎤 FASTER-WHISPER: Segment {i}: '{segment_text}' (start: {segment.start:.2f}s, end: {segment.end:.2f}s)")
+                if segment_text:  # Only add non-empty segments
+                    text_parts.append(segment_text)
+            
+            full_text = " ".join(text_parts)
+            print(f"🎤 FASTER-WHISPER: Combined text: '{full_text}' (from {len(text_parts)} non-empty segments)")
+            
+            # Fallback: If no segments, try with different parameters
+            if len(segments_list) == 0:
+                print(f"🎤 FASTER-WHISPER: Zero segments - trying fallback with forced parameters...")
+                try:
+                    segments_fallback, info_fallback = self.model.transcribe(
+                        audio_samples,
+                        vad_filter=False,
+                        beam_size=1,
+                        language="en",  # Force English to avoid language confusion
+                        temperature=0.8,  # Higher temperature for more aggressive transcription
+                        no_speech_threshold=0.01,  # Very low threshold
+                        logprob_threshold=-2.0,    # Very low threshold
+                        condition_on_previous_text=False
+                    )
+                    
+                    fallback_segments = list(segments_fallback)
+                    print(f"🎤 FASTER-WHISPER FALLBACK: Got {len(fallback_segments)} segments")
+                    
+                    if len(fallback_segments) > 0:
+                        fallback_parts = []
+                        for segment in fallback_segments:
+                            if segment.text.strip():
+                                fallback_parts.append(segment.text.strip())
+                        full_text = " ".join(fallback_parts)
+                        print(f"🎤 FASTER-WHISPER FALLBACK: Text: '{full_text}'")
+                        
+                except Exception as fallback_error:
+                    print(f"🎤 FASTER-WHISPER FALLBACK ERROR: {fallback_error}")
+            
+        except Exception as e:
+            print(f"🎤 FASTER-WHISPER ERROR: Failed to process segments: {e}")
+            full_text = ""
         
         # Get language info
         detected_language = info.language if hasattr(info, 'language') else None

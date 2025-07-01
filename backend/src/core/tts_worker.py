@@ -8,6 +8,7 @@ Uses async operations within thread event loop for FastRTC compatibility.
 import time
 import asyncio
 import numpy as np
+from queue import Empty
 from typing import Optional, AsyncGenerator, Tuple, Any
 
 from .pipeline_workers import BasePipelineWorker
@@ -61,21 +62,54 @@ class TTSStreamingWorker(BasePipelineWorker):
         logger.info("🔊 TTSStreamingWorker initialized")
         
     def run(self):
-        """Main worker thread loop with async event loop."""
-        # Create event loop for this thread
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        
-        logger.info(f"✅ Worker {self.name} started with async event loop")
+        """Main worker thread loop using standard threading (no async event loop)."""
+        logger.info(f"✅ Worker {self.name} started with standard threading")
         
         try:
-            # Run the async worker loop
-            self.loop.run_until_complete(self._async_worker_loop())
+            # Use the standard threading-based worker loop
+            while not self.stop_requested and not self.pipeline_manager.stop_event.is_set():
+                try:
+                    # Get item from input queue
+                    item = self.input_queue.get(timeout=1.0)  # Increased timeout
+                    print(f"🔊 [TTS_WORKER] Got item from queue: {type(item)} - {getattr(item, 'text', '')[:50]}... (queue size now: {self.input_queue.qsize()})")
+                    
+                    # Check if generation is still active
+                    if hasattr(item, 'generation_id'):
+                        state = self.pipeline_manager.get_generation_state(item.generation_id)
+                        if not state or state.interrupted.is_set():
+                            print(f"🔊 [TTS_WORKER] Skipping processing for interrupted generation {item.generation_id}")
+                            continue
+                    
+                    # Process the item synchronously
+                    start_time = time.time()
+                    try:
+                        result = self.process_item(item)
+                        processing_time = time.time() - start_time
+                        
+                        self.processed_items += 1
+                        self.total_processing_time += processing_time
+                        
+                        # Send result to output queue if successful
+                        if result is not None and self.output_queue is not None:
+                            print(f"🔊 [TTS_WORKER] Putting result to output queue (audio chunk)")
+                            self.output_queue.put(result)
+                            print(f"🔊 [TTS_WORKER] Output queue size now: {self.output_queue.qsize()}")
+                        else:
+                            print(f"🔊 [TTS_WORKER] NOT putting to output queue: result={result is not None}, output_queue={self.output_queue is not None}")
+                            
+                    except Exception as e:
+                        self.failed_items += 1
+                        self.handle_processing_error(item, e)
+                        
+                except Empty:
+                    # Timeout is normal, continue checking
+                    continue
+                except Exception as e:
+                    logger.error(f"Unexpected error in worker {self.name}: {e}")
+                    
         except Exception as e:
             logger.error(f"Fatal error in worker {self.name}: {e}")
         finally:
-            if self.loop and not self.loop.is_closed():
-                self.loop.close()
             logger.info(f"🏁 Worker {self.name} stopped")
             
     async def _async_worker_loop(self):
@@ -85,13 +119,17 @@ class TTSStreamingWorker(BasePipelineWorker):
                 # Get item from input queue (with timeout)
                 try:
                     # Use asyncio timeout for queue get
+                    print(f"🔊 [TTS_WORKER] Waiting for item from queue (current size: {self.input_queue.qsize()})...")
                     item = await asyncio.wait_for(
                         asyncio.to_thread(self.input_queue.get, timeout=self.processing_timeout),
                         timeout=self.processing_timeout + 0.1
                     )
+                    print(f"🔊 [TTS_WORKER] Got item from queue: {type(item)} - {getattr(item, 'text', '')[:50]}... (queue size now: {self.input_queue.qsize()})")
                 except asyncio.TimeoutError:
+                    print(f"🔊 [TTS_WORKER] Queue timeout, queue size: {self.input_queue.qsize()}")
                     continue
-                except Exception:
+                except Exception as e:
+                    print(f"🔊 [TTS_WORKER] Queue get exception: {e}")
                     continue
                 
                 # Check if generation is still active
@@ -378,21 +416,113 @@ class TTSStreamingWorker(BasePipelineWorker):
         if hasattr(item, 'generation_id'):
             self.active_generations.discard(item.generation_id)
             
-    def process_item(self, llm_chunk) -> Optional[Any]:
+    def process_item(self, llm_chunk) -> Optional[TTSAudioChunk]:
         """
-        Synchronous wrapper for process_item_async.
-        Required by BasePipelineWorker abstract method.
+        Process LLM token chunk through TTS synchronously.
         
         Args:
             llm_chunk: LLM chunk data to process
             
         Returns:
-            None - this worker uses async processing
+            TTSAudioChunk with synthesized audio, or None if failed
         """
-        # This method should not be called directly since TTSStreamingWorker
-        # overrides the worker loop to use async processing
-        logger.warning("process_item called on TTSStreamingWorker - this should use async processing")
-        return None
+        print(f"🔊 [TTS_WORKER] process_item called with: '{llm_chunk.text[:50]}...'")
+        generation_id = llm_chunk.generation_id
+        
+        # Update generation state
+        state = self.pipeline_manager.get_generation_state(generation_id)
+        if not state:
+            print(f"🔊 [TTS_WORKER] No state found for generation {generation_id}")
+            return None
+            
+        if state.tts_start_time is None:
+            state.tts_start_time = time.time()
+            state.status = GenerationStatus.TTS_SYNTHESIZING
+            state.tts_started.set()
+            
+        text_to_synthesize = llm_chunk.text.strip()
+        if not text_to_synthesize:
+            print(f"🔊 [TTS_WORKER] Empty text for generation {generation_id}")
+            return None
+        
+        try:
+            print(f"🔊 [TTS_WORKER] Starting TTS synthesis for: '{text_to_synthesize}'")
+            
+            # Get voice settings
+            current_language = getattr(self.voice_assistant, 'current_language', 'a')
+            voices = self.voice_mapper.get_voices_for_language(current_language)
+            voice_id = voices[0] if voices else 'af_heart'  # Default voice
+            
+            print(f"🔊 [TTS_WORKER] Using voice: {voice_id}, language: {current_language}")
+            
+            # Try Kokoro direct generator pattern first
+            audio_data = None
+            try:
+                # Option 1: Direct Kokoro pipeline (if available)
+                if hasattr(self.tts_engine, 'kokoro_pipeline') or hasattr(self.tts_engine, 'pipeline'):
+                    print(f"🔊 [TTS_WORKER] Using Kokoro generator pattern")
+                    pipeline = getattr(self.tts_engine, 'kokoro_pipeline', None) or getattr(self.tts_engine, 'pipeline', None)
+                    if pipeline:
+                        generator = pipeline(text_to_synthesize, voice=voice_id)
+                        for i, (graphemes, phonemes, audio) in enumerate(generator):
+                            print(f"🔊 [TTS_WORKER] Got audio chunk {i}: {type(audio)}")
+                            if isinstance(audio, np.ndarray) and audio.size > 0:
+                                audio_data = audio
+                                break
+                
+                # Option 2: Try existing TTS engine methods
+                if audio_data is None:
+                    print(f"🔊 [TTS_WORKER] Trying TTS engine methods")
+                    if hasattr(self.tts_engine, 'synthesize'):
+                        if asyncio.iscoroutinefunction(self.tts_engine.synthesize):
+                            print(f"🔊 [TTS_WORKER] Calling async synthesize with asyncio.run")
+                            audio_data = asyncio.run(self.tts_engine.synthesize(text_to_synthesize, voice_id, current_language))
+                        else:
+                            print(f"🔊 [TTS_WORKER] Calling sync synthesize")
+                            audio_data = self.tts_engine.synthesize(text_to_synthesize, voice_id, current_language)
+                        print(f"🔊 [TTS_WORKER] Got audio data: {type(audio_data)}")
+                
+            except Exception as kokoro_error:
+                print(f"🔊 [TTS_WORKER] Kokoro method failed: {kokoro_error}")
+                audio_data = None
+                
+            # Handle different audio data types
+            if isinstance(audio_data, np.ndarray) and audio_data.size > 0:
+                print(f"🔊 [TTS_WORKER] Got numpy array: {audio_data.shape}")
+                raw_audio = audio_data
+            elif hasattr(audio_data, 'samples') and isinstance(audio_data.samples, np.ndarray):
+                print(f"🔊 [TTS_WORKER] Got AudioData object, extracting samples: {audio_data.samples.shape}")
+                raw_audio = audio_data.samples
+            elif hasattr(audio_data, 'audio_data') and isinstance(audio_data.audio_data, np.ndarray):
+                print(f"🔊 [TTS_WORKER] Got AudioData object, extracting numpy array: {audio_data.audio_data.shape}")
+                raw_audio = audio_data.audio_data
+            elif hasattr(audio_data, 'data') and isinstance(audio_data.data, np.ndarray):
+                print(f"🔊 [TTS_WORKER] Got AudioData with .data: {audio_data.data.shape}")
+                raw_audio = audio_data.data
+            else:
+                print(f"🔊 [TTS_WORKER] Invalid audio data type: {type(audio_data)}")
+                if hasattr(audio_data, '__dict__'):
+                    print(f"🔊 [TTS_WORKER] AudioData attributes: {list(audio_data.__dict__.keys())}")
+                return None
+
+            # Create audio chunk
+            tts_chunk = TTSAudioChunk(
+                generation_id=generation_id,
+                sample_rate=22050,  # Kokoro TTS default
+                audio_data=raw_audio,
+                is_final=True
+            )
+            
+            print(f"🔊 [TTS_WORKER] Created TTS audio chunk: {raw_audio.shape}")
+            state.mark_completed()
+            return tts_chunk
+           
+            
+        except Exception as e:
+            print(f"🔊 [TTS_WORKER] TTS processing error: {e}")
+            logger.error(f"TTS processing error for generation {generation_id}: {e}")
+            state.mark_failed(f"TTS error: {e}")
+            return None
         
     def get_worker_stats(self) -> dict:
         """Get TTS worker statistics."""

@@ -8,6 +8,8 @@ STT_BACKEND = os.environ.get('STT_BACKEND', 'faster').lower()
 
 if STT_BACKEND == "slower":
     from .huggingface_stt import HuggingFaceSTTEngine as STTEngine
+elif STT_BACKEND == "whisper_live" or STT_BACKEND == "whisper-live":
+    from .whisper_live_stt import WhisperLiveSTTEngine as STTEngine
 else:
     from .faster_whisper_stt import FasterWhisperSTT as STTEngine
 

@@ -15,6 +15,11 @@ export function BackgroundCircleProvider() {
     const audioRef = useRef<HTMLAudioElement>(null);
     const clientRef = useRef<WebRTCClient | null>(null);
     const outputDeviceIdRef = useRef<string | undefined>(undefined);
+    
+    // WhisperLive integration
+    const [whisperLiveMode, setWhisperLiveMode] = useState(true); // Enable WhisperLive by default
+    const [transcriptionStatus, setTranscriptionStatus] = useState<'idle' | 'listening' | 'error'>('idle');
+    const [lastTranscription, setLastTranscription] = useState<string>('');
 
     // Memoize callbacks to prevent recreation on each render
     const handleConnected = useCallback(() => setIsConnected(true), []);
@@ -73,19 +78,71 @@ export function BackgroundCircleProvider() {
         };
     }, [handleConnected, handleDisconnected, handleAudioStream, handleAudioLevel]);
 
-    const handleStart = useCallback(() => {
-        if (clientRef.current) {
-            clientRef.current.connect().catch(error => {
-                console.error('Failed to connect:', error);
+    // WhisperLive API functions
+    const startWhisperLive = useCallback(async () => {
+        try {
+            setTranscriptionStatus('listening');
+            const response = await fetch('http://localhost:8000/api/whisperlive/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                mode: 'cors'
             });
+            if (!response.ok) {
+                throw new Error('Failed to start WhisperLive');
+            }
+            console.log('🎤 WhisperLive started successfully');
+        } catch (error) {
+            console.error('🎤 Failed to start WhisperLive:', error);
+            setTranscriptionStatus('error');
         }
     }, []);
 
+    const stopWhisperLive = useCallback(async () => {
+        try {
+            const response = await fetch('http://localhost:8000/api/whisperlive/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                mode: 'cors'
+            });
+            if (!response.ok) {
+                throw new Error('Failed to stop WhisperLive');
+            }
+            setTranscriptionStatus('idle');
+            console.log('🎤 WhisperLive stopped successfully');
+        } catch (error) {
+            console.error('🎤 Failed to stop WhisperLive:', error);
+            setTranscriptionStatus('error');
+        }
+    }, []);
+
+    const handleStart = useCallback(() => {
+        if (whisperLiveMode) {
+            // WhisperLive mode: start microphone transcription + WebRTC for audio output only
+            startWhisperLive();
+            if (clientRef.current) {
+                // Connect WebRTC for audio output (no microphone capture)
+                clientRef.current.connectOutputOnly().catch(error => {
+                    console.error('Failed to connect WebRTC output:', error);
+                });
+            }
+        } else {
+            // Standard mode: WebRTC with microphone capture
+            if (clientRef.current) {
+                clientRef.current.connect().catch(error => {
+                    console.error('Failed to connect:', error);
+                });
+            }
+        }
+    }, [whisperLiveMode, startWhisperLive]);
+
     const handleStop = useCallback(() => {
+        if (whisperLiveMode) {
+            stopWhisperLive();
+        }
         if (clientRef.current) {
             clientRef.current.disconnect();
         }
-    }, []);
+    }, [whisperLiveMode, stopWhisperLive]);
 
     // Handle device change
     const handleDeviceChange = useCallback((deviceId: string, type: 'input' | 'output') => {
@@ -123,6 +180,47 @@ export function BackgroundCircleProvider() {
                 isActive={isConnected}
             />
             
+            {/* WhisperLive Mode Toggle */}
+            <div className="absolute top-4 left-4 z-10 pointer-events-auto">
+                <div className="bg-white/10 dark:bg-black/20 backdrop-blur-sm rounded-lg p-2">
+                    <label className="flex items-center gap-2 text-sm text-black/70 dark:text-white/70">
+                        <input
+                            type="checkbox"
+                            checked={whisperLiveMode}
+                            onChange={(e) => setWhisperLiveMode(e.target.checked)}
+                            className="rounded"
+                        />
+                        WhisperLive STT
+                    </label>
+                </div>
+            </div>
+
+            {/* Transcription Status */}
+            {whisperLiveMode && (
+                <div className="absolute top-16 left-4 z-10 pointer-events-none">
+                    <div className="bg-white/10 dark:bg-black/20 backdrop-blur-sm rounded-lg p-2 text-sm">
+                        <div className={`flex items-center gap-2 ${
+                            transcriptionStatus === 'listening' ? 'text-green-600 dark:text-green-400' :
+                            transcriptionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
+                            'text-black/70 dark:text-white/70'
+                        }`}>
+                            <div className={`w-2 h-2 rounded-full ${
+                                transcriptionStatus === 'listening' ? 'bg-green-500 animate-pulse' :
+                                transcriptionStatus === 'error' ? 'bg-red-500' :
+                                'bg-gray-400'
+                            }`} />
+                            {transcriptionStatus === 'listening' ? 'Listening...' : 
+                             transcriptionStatus === 'error' ? 'Error' : 'Ready'}
+                        </div>
+                        {lastTranscription && (
+                            <div className="mt-1 text-xs text-black/50 dark:text-white/50 max-w-xs truncate">
+                                "{lastTranscription}"
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Audio Device Selector - Responsive positioning */}
             <div className="absolute top-12 left-0 right-0 p-4 z-10 flex justify-center pointer-events-none">
                 <div className="w-full max-w-[250px] sm:max-w-[400px] pointer-events-auto">
