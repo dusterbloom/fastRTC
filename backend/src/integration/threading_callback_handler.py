@@ -85,6 +85,19 @@ class ThreadingCallbackHandler:
         
         # Lock for transcription updates
         self.transcription_lock = threading.Lock()
+        
+        # Deduplication to prevent feedback loops
+        self.last_processed_transcription = ""
+        self.transcription_count = 0
+
+        # Background TTS output polling for WhisperLive mode
+        self.tts_output_thread = None
+        self.tts_output_running = False
+        self.fastrtc_audio_callback = None  # Store FastRTC callback for TTS output
+        
+        # TTS interruption support for barge-in
+        self.tts_interrupt_flag = threading.Event()
+        self.active_audio_playback = None  # Track current sounddevice playback
 
         # Current generation tracking
         self.current_generation_id = None
@@ -277,12 +290,41 @@ class ThreadingCallbackHandler:
         try:
             # Check if we're in WhisperLive mode (frontend-controlled)
             if self.whisperlive_mode:
-                print("🎤 THREADING: WhisperLive mode active - skipping WebRTC audio processing")
-                logger.info("🎤 WhisperLive mode: Audio processing handled by TranscriptionClient")
+                print("🎤 THREADING: WhisperLive mode active - polling for TTS output only")
+                logger.info("🎤 WhisperLive mode: Polling for TTS audio output from pipeline")
                 
-                # FastRTC needs to return empty audio to maintain the connection
-                # WhisperLive handles microphone directly, we just maintain WebRTC for output
-                yield EMPTY_AUDIO_YIELD_OUTPUT
+                # In WhisperLive mode, we don't process WebRTC input audio, but we still need to
+                # yield TTS audio output from the pipeline back to FastRTC
+                yielded_chunks = 0
+                timeout_start = time.time()
+                max_wait_time = 5.0  # Shorter wait time for WhisperLive mode
+                
+                print(f"🎵 [WHISPERLIVE] Starting TTS output polling loop for up to {max_wait_time}s...")
+                while time.time() - timeout_start < max_wait_time:
+                    elapsed = time.time() - timeout_start
+                    
+                    # Get available output chunks (any generation)
+                    output_chunk = self.pipeline_manager.get_output_audio(timeout=0.05)
+                    if output_chunk:
+                        # Convert to FastRTC format and yield
+                        audio_output = (output_chunk.sample_rate, output_chunk.audio_data)
+                        print(f"🎵 [WHISPERLIVE] Yielding TTS audio chunk: gen_id={output_chunk.generation_id}, sample_rate={output_chunk.sample_rate}, shape={output_chunk.audio_data.shape}")
+                        yield (audio_output, AdditionalOutputs())
+                        yielded_chunks += 1
+                        print(f"🎵 [WHISPERLIVE] TTS audio chunk yielded successfully to FastRTC")
+                        
+                        # If this was the final chunk, we're done
+                        if output_chunk.is_final:
+                            print(f"🎵 [WHISPERLIVE] Final TTS chunk yielded for generation {output_chunk.generation_id}")
+                            break
+                
+                # If no TTS chunks were yielded, return empty audio to maintain WebRTC connection
+                if yielded_chunks == 0:
+                    print("🎵 [WHISPERLIVE] No TTS audio available, yielding empty audio to maintain connection")
+                    yield EMPTY_AUDIO_YIELD_OUTPUT
+                else:
+                    print(f"🎵 [WHISPERLIVE] Successfully yielded {yielded_chunks} TTS audio chunks")
+                
                 return
             
             # Check if we're using legacy WhisperLive VAD mode (STT worker disabled)
@@ -345,22 +387,34 @@ class ThreadingCallbackHandler:
             # Yield audio chunks as they become available
             yielded_chunks = 0
             timeout_start = time.time()
-            max_wait_time = 10.0  # Maximum time to wait for response
+            max_wait_time = 30.0  # Maximum time to wait for response (increased for TTS)
 
+            print(f"🎵 [CALLBACK] Starting polling loop for up to {max_wait_time}s...")
             while time.time() - timeout_start < max_wait_time:
+                elapsed = time.time() - timeout_start
+                print(f"🎵 [CALLBACK] Polling iteration {int(elapsed*20):03d} (elapsed: {elapsed:.1f}s)")
+                
                 # Check if generation was interrupted
                 state = self.pipeline_manager.get_generation_state(generation_id)
                 if state and state.interrupted.is_set():
                     logger.info(f"Generation {generation_id} was interrupted")
                     break
 
-                # Get available output chunks
-                output_chunk = self.pipeline_manager.get_output_audio(timeout=0.1)
-                if output_chunk and output_chunk.generation_id == generation_id:
+                # Get available output chunks (ANY generation, not just current one)
+                output_chunk = self.pipeline_manager.get_output_audio(timeout=0.05)  # Faster polling
+                if output_chunk:
                     # Convert to FastRTC format and yield
                     audio_output = (output_chunk.sample_rate, output_chunk.audio_data)
+                    print(f"🎵 [CALLBACK] Yielding audio chunk: gen_id={output_chunk.generation_id}, sample_rate={output_chunk.sample_rate}, shape={output_chunk.audio_data.shape}")
                     yield (audio_output, AdditionalOutputs())
                     yielded_chunks += 1
+                    print(f"🎵 [CALLBACK] Audio chunk yielded successfully to FastRTC")
+                    
+                    # If this was the final chunk for any generation, check if we're done
+                    if output_chunk.is_final:
+                        output_state = self.pipeline_manager.get_generation_state(output_chunk.generation_id)
+                        if output_state and output_state.status == GenerationStatus.COMPLETED:
+                            print(f"🎵 [CALLBACK] Final chunk yielded for generation {output_chunk.generation_id}")
 
                     logger.debug(
                         f"📢 Yielded chunk {yielded_chunks} for generation {generation_id}"
@@ -462,15 +516,32 @@ class ThreadingCallbackHandler:
         """Transcription callback from WhisperLive (like voiceagent example)."""
         try:
             if text and text.strip():
-                print(f"🎤 TRANSCRIPTION CALLBACK: '{text}'")
-                logger.info(f"🎤 WhisperLive transcription: {text}")
+                cleaned_text = text.strip()
+                print(f"🎤 TRANSCRIPTION CALLBACK: '{cleaned_text}'")
+                logger.info(f"🎤 WhisperLive transcription: {cleaned_text}")
+                
+                # Deduplication check to prevent feedback loops
+                if cleaned_text == self.last_processed_transcription:
+                    self.transcription_count += 1
+                    if self.transcription_count > 2:  # Allow max 2 repeats before blocking
+                        print(f"🎤 DUPLICATE BLOCKED: '{cleaned_text}' (count: {self.transcription_count})")
+                        return
+                    else:
+                        print(f"🎤 DUPLICATE DETECTED: '{cleaned_text}' (count: {self.transcription_count})")
+                else:
+                    # New transcription, reset counter
+                    self.last_processed_transcription = cleaned_text
+                    self.transcription_count = 1
                 
                 # Store transcription for processing in main thread
                 with self.transcription_lock:
-                    self.last_transcription = text.strip()
+                    self.last_transcription = cleaned_text
+                
+                # BARGE-IN: User is speaking - interrupt any active TTS immediately
+                print(f"🛑 USER SPEAKING: Interrupting TTS for barge-in")
+                self._interrupt_tts_playback()
                 
                 # Only process complete sentences (like voiceagent)
-                cleaned_text = text.strip()
                 if self._is_complete_sentence(cleaned_text):
                     print(f"🎤 COMPLETE SENTENCE: '{cleaned_text}'")
                     logger.info(f"🎤 Processing complete sentence: {cleaned_text}")
@@ -547,6 +618,9 @@ class ThreadingCallbackHandler:
             self.whisperlive_mode = True
             print("🎤 API: WhisperLive TranscriptionClient initialized")
             
+            # Start TTS output polling thread for WhisperLive mode
+            self._start_tts_output_thread()
+            
             # Start microphone streaming in separate thread (like voiceagent)
             def stream_microphone():
                 try:
@@ -586,6 +660,9 @@ class ThreadingCallbackHandler:
             print("🎤 API: Stopping WhisperLive microphone streaming")
             self.whisper_live_active = False
             self.whisperlive_mode = False
+            
+            # Stop TTS output polling thread
+            self._stop_tts_output_thread()
             
             if self.whisper_live_client:
                 self.whisper_live_client.close_all_clients()
@@ -703,6 +780,170 @@ class ThreadingCallbackHandler:
         # Interrupt TTS worker for cleanup
         if self.tts_worker:
             self.tts_worker.interrupt_all_active()
+
+    def _start_tts_output_thread(self):
+        """Start background thread to poll TTS output queue and yield audio to FastRTC."""
+        if self.tts_output_running:
+            print("🎵 TTS output thread already running")
+            return
+        
+        print("🎵 Starting TTS output polling thread for WhisperLive mode")
+        self.tts_output_running = True
+        
+        def tts_output_worker():
+            """Background worker that continuously polls for TTS audio and yields to FastRTC."""
+            print("🎵 [TTS_OUTPUT] Background TTS output worker started")
+            logger.info("🎵 TTS output worker thread started")
+            
+            yielded_chunks = 0
+            
+            while self.tts_output_running and self.whisperlive_mode:
+                try:
+                    # Check for interruption request
+                    if self.tts_interrupt_flag.is_set():
+                        print(f"🛑 [TTS_OUTPUT] Interruption requested - clearing output queue")
+                        # Clear all pending TTS audio from queue
+                        self._clear_tts_output_queue()
+                        self.tts_interrupt_flag.clear()
+                        print(f"🛑 [TTS_OUTPUT] Output queue cleared, resuming polling")
+                    
+                    # Poll output queue for TTS audio
+                    output_chunk = self.pipeline_manager.get_output_audio(timeout=0.05)
+                    if output_chunk:
+                        print(f"🎵 [TTS_OUTPUT] Got TTS audio chunk: gen_id={output_chunk.generation_id}, shape={output_chunk.audio_data.shape}")
+                        
+                        # Check again for interruption before playing
+                        if not self.tts_interrupt_flag.is_set():
+                            # Use direct audio playback since we don't have FastRTC callback context here
+                            self._play_audio_directly(output_chunk)
+                            yielded_chunks += 1
+                            
+                            if output_chunk.is_final:
+                                print(f"🎵 [TTS_OUTPUT] Final TTS chunk processed for generation {output_chunk.generation_id}")
+                        else:
+                            print(f"🛑 [TTS_OUTPUT] Interruption detected - skipping audio chunk")
+                    
+                    # Small sleep to prevent CPU spinning
+                    time.sleep(0.01)
+                    
+                except Exception as e:
+                    print(f"🎵 [TTS_OUTPUT] Error in TTS output worker: {e}")
+                    logger.error(f"TTS output worker error: {e}")
+                    time.sleep(0.1)
+            
+            print(f"🎵 [TTS_OUTPUT] TTS output worker stopped. Total chunks processed: {yielded_chunks}")
+            logger.info(f"🎵 TTS output worker stopped. Chunks processed: {yielded_chunks}")
+        
+        # Start the worker thread
+        self.tts_output_thread = threading.Thread(target=tts_output_worker, daemon=True)
+        self.tts_output_thread.start()
+        print("🎵 TTS output polling thread started successfully")
+
+    def _stop_tts_output_thread(self):
+        """Stop the TTS output polling thread."""
+        if not self.tts_output_running:
+            return
+        
+        print("🎵 Stopping TTS output polling thread")
+        self.tts_output_running = False
+        
+        if self.tts_output_thread and self.tts_output_thread.is_alive():
+            self.tts_output_thread.join(timeout=2.0)
+            if self.tts_output_thread.is_alive():
+                print("🎵 WARNING: TTS output thread did not stop cleanly")
+        
+        print("🎵 TTS output polling thread stopped")
+
+    def _play_audio_directly(self, audio_chunk: TTSAudioChunk):
+        """Play TTS audio directly using system audio (bypass FastRTC)."""
+        try:
+            import sounddevice as sd
+            
+            # Stop any currently playing audio first (for interruption)
+            if self.active_audio_playback is not None:
+                try:
+                    sd.stop()
+                    print(f"🛑 [DIRECT_AUDIO] Stopped previous audio for new playback")
+                except:
+                    pass  # Ignore errors if nothing was playing
+            
+            # Convert audio data to the right format
+            audio_data = audio_chunk.audio_data.astype(np.float32)
+            sample_rate = audio_chunk.sample_rate
+            
+            print(f"🔊 [DIRECT_AUDIO] Playing audio: {audio_data.shape} samples at {sample_rate}Hz")
+            
+            # Play audio directly through system speakers
+            sd.play(audio_data, samplerate=sample_rate)
+            self.active_audio_playback = True
+            
+            # Don't wait for playback to finish - this allows overlapping/interruption
+            # sd.wait() would block until audio finishes
+            
+            print(f"🔊 [DIRECT_AUDIO] Audio playback started successfully")
+            
+        except ImportError:
+            print("🔊 [DIRECT_AUDIO] sounddevice not available, trying alternative...")
+            # Fallback to other audio libraries if needed
+            try:
+                import pyaudio
+                import wave
+                
+                # Convert numpy array to audio data
+                # This is a more complex fallback - for now just log the attempt
+                print(f"🔊 [DIRECT_AUDIO] Using PyAudio fallback (implementation needed)")
+                
+            except ImportError:
+                print("🔊 [DIRECT_AUDIO] ERROR: No audio playback library available (install sounddevice or pyaudio)")
+                
+        except Exception as e:
+            print(f"🔊 [DIRECT_AUDIO] Error playing audio: {e}")
+            logger.error(f"Direct audio playback error: {e}")
+
+    def _interrupt_tts_playback(self):
+        """Interrupt any active TTS playback immediately (barge-in)."""
+        print(f"🛑 [INTERRUPT] Interrupting TTS playback for user barge-in")
+        
+        # Stop current audio playback immediately
+        try:
+            import sounddevice as sd
+            sd.stop()
+            self.active_audio_playback = None
+            print(f"🛑 [INTERRUPT] Stopped active audio playback")
+        except Exception as e:
+            print(f"🛑 [INTERRUPT] Error stopping audio: {e}")
+        
+        # Signal TTS output worker to clear queue
+        self.tts_interrupt_flag.set()
+        
+        # Interrupt TTS synthesis pipeline
+        if self.tts_worker:
+            self.tts_worker.interrupt_all_active()
+            print(f"🛑 [INTERRUPT] Interrupted TTS worker")
+        
+        # Interrupt TTS engine directly
+        if self.tts_engine:
+            self.tts_engine.interrupt()
+            print(f"🛑 [INTERRUPT] Interrupted TTS engine")
+        
+        print(f"🛑 [INTERRUPT] TTS interruption complete")
+
+    def _clear_tts_output_queue(self):
+        """Clear all pending TTS audio from output queue."""
+        cleared_count = 0
+        try:
+            while True:
+                chunk = self.pipeline_manager.get_output_audio(timeout=0.001)  # Very short timeout
+                if chunk is None:
+                    break
+                cleared_count += 1
+        except:
+            pass  # Expected when queue is empty
+        
+        if cleared_count > 0:
+            print(f"🗑️ [CLEAR_QUEUE] Cleared {cleared_count} pending TTS audio chunks")
+        else:
+            print(f"🗑️ [CLEAR_QUEUE] No pending TTS audio to clear")
 
     def get_handler_stats(self) -> dict:
         """Get callback handler statistics."""
